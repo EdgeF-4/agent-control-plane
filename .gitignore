@@ -1,0 +1,43 @@
+# Secrets — the control plane reads runtime secrets from config.json only.
+config.json
+config.local.json
+config.*.json
+!config.example.json
+
+# Runtime data (engine stores: cost ledger, recorded runs, SIEM sink, DLQ)
+/data/
+backend/data/
+*.db
+*.db-wal
+*.db-shm
+*.ndjson
+runs/
+dlq/
+
+# Vendored engine packages copied in for image builds (never committed)
+backend/engines_vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

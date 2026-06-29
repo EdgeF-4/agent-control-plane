@@ -1,0 +1,64 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8800,
+    "cors_origins": [
+      "http://localhost:5173",
+      "http://localhost:8801"
+    ]
+  },
+  "database": {
+    "host": "postgres",
+    "port": 5432,
+    "name": "controlplane",
+    "user": "controlplane",
+    "password": "change-me-to-a-long-random-secret",
+    "url": null
+  },
+  "auth": {
+    "jwt_secret": "change-me-to-a-long-random-secret",
+    "access_token_ttl_minutes": 720,
+    "issuer": "agent-control-plane",
+    "audience": "control-plane"
+  },
+  "data_dir": "/data",
+  "engines": {
+    "cost": {
+      "database_path": "/data/cost/ledger.db",
+      "default_warn_threshold": 0.8
+    },
+    "recorder": {
+      "log_dir": "/data/runs",
+      "max_run_bytes": 8388608,
+      "max_runs": 5000
+    },
+    "siem": {
+      "redaction": { "enabled": true },
+      "sinks": [
+        {
+          "type": "file",
+          "name": "local-audit",
+          "enabled": true,
+          "path": "/data/siem/audit.ndjson"
+        }
+      ]
+    },
+    "policy": {
+      "default": "allow",
+      "rules": [
+        {
+          "client_id": "*",
+          "roles": [],
+          "allow": [],
+          "deny": ["*__delete*", "shell__*", "*__exec*"]
+        }
+      ]
+    }
+  },
+  "bootstrap": {
+    "tenant_slug": "acme",
+    "tenant_name": "Acme Corp",
+    "admin_email": "admin@acme.test",
+    "admin_password": "change-me-on-first-login"
+  }
+}

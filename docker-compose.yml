@@ -1,0 +1,50 @@
+name: agent-control-plane
+
+# Brings up the whole stack: PostgreSQL (the unified projection store), the
+# control plane API (which composes the engines), and the dashboard.
+#
+# Secrets are never stored in this file or a .env. The backend reads them from
+# config.json (mounted read-only). scripts/up.sh feeds Postgres the matching
+# credentials from that same config.json — run `make up` rather than
+# `docker compose up` so the values line up.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-controlplane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-controlplane}
+      POSTGRES_DB: ${POSTGRES_DB:-controlplane}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-controlplane}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - acp-data:/data
+    ports:
+      - "8800:8800"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8801:80"
+
+volumes:
+  pgdata:
+  acp-data:
