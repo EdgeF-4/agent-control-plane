@@ -27,7 +27,8 @@ from flight_recorder.recorder import RunLog
 from mcp_siem_bridge.pipeline import Pipeline
 
 # Policy engine — allow/deny decisions.
-from mcp_gateway.config import PolicyConfig, PolicyRule
+from mcp_gateway.auth import Authenticator
+from mcp_gateway.config import ApiKeyRecord, PolicyConfig, PolicyRule
 from mcp_gateway.identity import ClientIdentity
 from mcp_gateway.policy import PolicyEngine
 
@@ -58,6 +59,9 @@ class EngineHub:
         self.settings = settings
         self._lock = threading.RLock()
         self._runs: dict[str, RunLog] = {}
+        # Ingest authenticator, composed from the gateway engine. Rebuilt from the
+        # database whenever project API keys change; empty until keys are synced.
+        self._ingest_authenticator = Authenticator(api_keys=())
 
         # --- cost engine -------------------------------------------------
         cost_db = settings.engines.cost.get("database_path") or settings.engine_path(
@@ -137,6 +141,34 @@ class EngineHub:
             client_id=client_id, roles=tuple(roles), auth_method="oauth2"
         )
         return bool(self.policy.allows(identity, server, tool))
+
+    # ------------------------------------------------------------------ #
+    # Ingest authentication (per-project API keys)
+    # ------------------------------------------------------------------ #
+    def set_ingest_keys(self, keys: list[dict]) -> None:
+        """Rebuild the ingest authenticator from the active API-key records.
+
+        Each record maps a key digest to its own id (used as the client id) and
+        the ``agent`` role. Revoked keys are simply left out of the set.
+        """
+        records = tuple(
+            ApiKeyRecord(client_id=k["client_id"], key_sha256=k["key_sha256"], roles=("agent",))
+            for k in keys
+        )
+        with self._lock:
+            self._ingest_authenticator = Authenticator(api_keys=records)
+
+    def authenticate_ingest(self, headers) -> str | None:
+        """Return the authenticating key's client id, or ``None``.
+
+        Composes the gateway's :class:`Authenticator`, so header parsing
+        (``Authorization: Bearer``/``ApiKey`` and ``X-API-Key``) and the
+        constant-time digest match are exactly the gateway's.
+        """
+        with self._lock:
+            authenticator = self._ingest_authenticator
+        identity, _reason = authenticator.authenticate(headers)
+        return identity.client_id if identity is not None else None
 
     # ------------------------------------------------------------------ #
     # Cost

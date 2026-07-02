@@ -9,7 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models, schemas, services
-from ..deps import CurrentUser, get_bus, get_current_user, get_hub, get_session
+from ..deps import (
+    CurrentUser,
+    get_bus,
+    get_current_user,
+    get_hub,
+    get_ingest_principal,
+    get_session,
+)
 from ..engines import EngineHub
 from ..live import EventBus
 
@@ -19,6 +26,9 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 async def _get_run(session: AsyncSession, current: CurrentUser, run_id: uuid.UUID) -> models.Run:
     run = await session.get(models.Run, run_id)
     if run is None or run.tenant_id != current.tenant_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
+    # An API key may only touch runs in the one project it is scoped to.
+    if current.scoped_project_id is not None and run.project_id != current.scoped_project_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
     return run
 
@@ -45,7 +55,7 @@ async def list_runs(
 @router.post("", response_model=schemas.RunOut, status_code=status.HTTP_201_CREATED)
 async def create_run(
     payload: schemas.RunCreate,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_ingest_principal),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
     bus: EventBus = Depends(get_bus),
@@ -54,12 +64,14 @@ async def create_run(
         return await services.create_run(session, hub, bus, current, payload)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
 
 
 @router.post("/ingest", status_code=status.HTTP_201_CREATED)
 async def ingest_run(
     payload: schemas.IngestRun,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_ingest_principal),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
     bus: EventBus = Depends(get_bus),
@@ -68,6 +80,8 @@ async def ingest_run(
         run, outcomes = await services.ingest_run(session, hub, bus, current, payload)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
     return {
         "run": schemas.RunOut.model_validate(run).model_dump(mode="json"),
         "outcomes": [o.model_dump() for o in outcomes],
@@ -87,7 +101,7 @@ async def get_run(
 async def report_usage(
     run_id: uuid.UUID,
     payload: schemas.UsageReport,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_ingest_principal),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
     bus: EventBus = Depends(get_bus),
@@ -102,7 +116,7 @@ async def report_usage(
 async def report_tool_call(
     run_id: uuid.UUID,
     payload: schemas.ToolCallReport,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_ingest_principal),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
     bus: EventBus = Depends(get_bus),
@@ -115,7 +129,7 @@ async def report_tool_call(
 async def complete_run(
     run_id: uuid.UUID,
     payload: schemas.RunComplete,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_ingest_principal),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
     bus: EventBus = Depends(get_bus),

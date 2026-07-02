@@ -7,13 +7,29 @@ audited token machinery.
 
 from __future__ import annotations
 
+import secrets
 import time
 
 import bcrypt
-from mcp_gateway.auth import OAuth2Verifier, encode_jwt_hs256
+from mcp_gateway.auth import OAuth2Verifier, encode_jwt_hs256, sha256_hex
 from mcp_gateway.identity import ClientIdentity
 
 from .config import AuthConfig
+
+# Ingest API keys are opaque bearer tokens. The prefix is a stable, non-secret
+# label kept for display; the rest is high-entropy and never stored in the clear.
+API_KEY_PREFIX = "acp_"
+
+
+def generate_api_key() -> tuple[str, str, str]:
+    """Mint a new ingest key.
+
+    Returns ``(plaintext, prefix, sha256)``. The plaintext is shown to the
+    operator exactly once; only the digest and prefix are persisted. Hashing uses
+    the gateway engine's own ``sha256_hex`` so keys match its credential scheme.
+    """
+    plaintext = API_KEY_PREFIX + secrets.token_hex(24)
+    return plaintext, plaintext[: len(API_KEY_PREFIX) + 8], sha256_hex(plaintext)
 
 
 def hash_password(password: str) -> str:

@@ -94,6 +94,35 @@ class Project(Base):
         return f"{self.tenant_id}/{self.slug}"
 
 
+class ApiKey(Base):
+    """A per-project ingest credential for the agents/SDKs that POST runs.
+
+    Only the SHA-256 digest of the key is stored, so a leaked database never
+    exposes a usable credential (the same discipline the gateway engine uses).
+    The short prefix is kept for display and to help operators identify a key.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), default="")
+    key_prefix: Mapped[str] = mapped_column(String(16), index=True)
+    key_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
+
+
 class Run(Base):
     __tablename__ = "runs"
 

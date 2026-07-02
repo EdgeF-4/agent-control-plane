@@ -13,10 +13,15 @@ from sqlalchemy.engine import make_url
 
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 
 from app.db import Base
 from app import models  # noqa: F401 — populate metadata
-from app.migrations import upgrade_head_sync
+from app.migrations import _config, upgrade_head_sync
+
+
+def _head_revision() -> str:
+    return ScriptDirectory.from_config(_config("sqlite://")).get_current_head()
 
 
 def _sqlite_path(tmp_path) -> tuple[str, str]:
@@ -42,7 +47,7 @@ def test_upgrade_head_builds_every_table(tmp_path):
 
     for expected in Base.metadata.tables:
         assert expected in tables, f"migration did not create {expected!r}"
-    assert version[0] == "0001"
+    assert version[0] == _head_revision()
 
 
 def test_upgrade_head_is_idempotent(tmp_path):

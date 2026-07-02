@@ -74,6 +74,24 @@ async def _resolve_project(
     return project
 
 
+async def _resolve_project_for_principal(
+    session: AsyncSession, current: CurrentUser, slug: str
+) -> models.Project:
+    """Resolve the target project, enforcing an API key's project scope.
+
+    An API-key principal may only act on the one project it belongs to: the slug
+    is optional (the key implies it), and a mismatching slug is refused.
+    """
+    if current.scoped_project_id is not None:
+        project = await session.get(models.Project, current.scoped_project_id)
+        if project is None or project.tenant_id != current.tenant_id:
+            raise KeyError(slug or "scoped project")
+        if slug and project.slug != slug:
+            raise PermissionError("this api key is scoped to a different project")
+        return project
+    return await _resolve_project(session, current.tenant_id, slug)
+
+
 # --------------------------------------------------------------------------- #
 # Run lifecycle
 # --------------------------------------------------------------------------- #
@@ -84,7 +102,7 @@ async def create_run(
     current: CurrentUser,
     payload: schemas.RunCreate,
 ) -> models.Run:
-    project = await _resolve_project(session, current.tenant_id, payload.project_slug)
+    project = await _resolve_project_for_principal(session, current, payload.project_slug)
     external_run_id = f"{current.tenant.slug}__{project.slug}__{uuid.uuid4().hex[:12]}"
 
     sealed = await asyncio.to_thread(

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .bootstrap import bootstrap_tenant, sync_budgets
+from .bootstrap import bootstrap_tenant, refresh_ingest_keys, sync_budgets
 from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
@@ -40,6 +40,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         await bootstrap_tenant(settings, db)
         await sync_budgets(db, hub)
+        async with db.sessionmaker() as session:
+            await refresh_ingest_keys(session, hub)
         try:
             yield
         finally:

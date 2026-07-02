@@ -56,9 +56,30 @@ class ProjectOut(BaseModel):
     budget_latches_kill: bool
 
 
+# --- api keys -------------------------------------------------------------- #
+class ApiKeyCreate(BaseModel):
+    name: str = ""
+
+
+class ApiKeyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+class ApiKeyCreated(ApiKeyOut):
+    # The plaintext key, returned exactly once at creation time.
+    key: str
+
+
 # --- runs ------------------------------------------------------------------ #
 class RunCreate(BaseModel):
-    project_slug: str
+    # Optional for API-key callers: the key already implies its project.
+    project_slug: str = ""
     agent_name: str = ""
     label: str = ""
     input: dict | None = None
@@ -90,7 +111,7 @@ class RunComplete(BaseModel):
 class IngestRun(BaseModel):
     """Atomic ingest: open, report usage and tool calls, then close in one call."""
 
-    project_slug: str
+    project_slug: str = ""
     agent_name: str = ""
     label: str = ""
     input: dict | None = None

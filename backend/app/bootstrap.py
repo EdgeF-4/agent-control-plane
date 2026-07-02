@@ -54,3 +54,19 @@ async def sync_budgets(db: Database, hub: EngineHub) -> None:
                 warn_threshold=project.budget_warn_threshold,
                 latch=project.budget_latches_kill,
             )
+
+
+async def refresh_ingest_keys(session, hub: EngineHub) -> None:
+    """Rebuild the hub's ingest authenticator from the active API keys.
+
+    Called on startup and after any key is created or revoked, so the
+    gateway-composed authenticator always reflects the current set.
+    """
+    result = await session.execute(
+        select(models.ApiKey).where(models.ApiKey.revoked_at.is_(None))
+    )
+    keys = [
+        {"client_id": str(k.id), "key_sha256": k.key_sha256}
+        for k in result.scalars().all()
+    ]
+    hub.set_ingest_keys(keys)

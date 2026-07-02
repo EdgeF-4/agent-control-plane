@@ -41,6 +41,10 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
 class CurrentUser:
     user: models.User
     tenant: models.Tenant
+    # "user" for a human/JWT caller, "api_key" for an agent authenticating with a
+    # project ingest key. An api_key principal is scoped to exactly one project.
+    kind: str = "user"
+    scoped_project_id: uuid.UUID | None = None
 
     @property
     def tenant_id(self) -> uuid.UUID:
@@ -79,3 +83,43 @@ async def require_admin(current: CurrentUser = Depends(get_current_user)) -> Cur
     if not current.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "admin role required")
     return current
+
+
+async def get_ingest_principal(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    session: AsyncSession = Depends(get_session),
+) -> CurrentUser:
+    """Authenticate a run-ingest request as either a project API key or a user.
+
+    A project API key is tried first (via the gateway-composed authenticator on
+    the hub); it yields a principal scoped to that one project and attributed to
+    an ``agent`` actor. If no key matches, this falls back to the normal user
+    JWT, so the dashboard and existing tooling keep working unchanged.
+    """
+    hub: EngineHub = request.app.state.hub
+    client_id = hub.authenticate_ingest(request.headers)
+    if client_id is not None:
+        try:
+            key_id = uuid.UUID(client_id)
+        except ValueError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid api key identity")
+        api_key = await session.get(models.ApiKey, key_id)
+        if api_key is None or not api_key.active:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown or revoked api key")
+        tenant = await session.get(models.Tenant, api_key.tenant_id)
+        if tenant is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown tenant")
+        api_key.last_used_at = models.utcnow()
+        await session.commit()
+        # A transient actor for attribution; never persisted as a user row.
+        agent_user = models.User(
+            id=api_key.id, tenant_id=api_key.tenant_id,
+            email=f"agentkey:{api_key.key_prefix}", name=api_key.name or "agent key",
+            role="agent", password_hash="",
+        )
+        return CurrentUser(
+            user=agent_user, tenant=tenant, kind="api_key",
+            scoped_project_id=api_key.project_id,
+        )
+    return await get_current_user(request, credentials, session)
