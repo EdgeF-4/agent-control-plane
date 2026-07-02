@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Dependency-free TypeScript client for the Agent Control Plane.",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "main": "dist/control-plane.js",
   "types": "dist/control-plane.d.ts",
   "exports": {
