@@ -81,6 +81,18 @@ export interface DlqEntry {
   sink: string; error: string; attempts: number; failed_at: string; event_count: number;
 }
 export interface SinkTest { ok: boolean; detail: string; }
+export interface TimelinePoint {
+  seq: number; ts: string; event_type: string; name: string | null;
+  cost_micro: number; cumulative_micro: number; cumulative_tokens: number; elapsed_s: number;
+}
+export interface RunTimeline {
+  run_id: string; points: TimelinePoint[]; total_cost_micro: number;
+  total_tokens: number; duration_s: number; burn_rate_usd_per_min: number;
+}
+export interface BudgetAlert {
+  project: string; kind: string; message: string; scope_id: string;
+  spent_micro: number; limit_micro: number; fraction: number; ts: string; run_id?: string;
+}
 export interface Overview {
   tenant: { id: string; slug: string; name: string };
   runs: { total: number; running: number; completed: number; killed: number; error: number };
@@ -100,6 +112,7 @@ export const api = {
   runs: () => request<Run[]>("/runs"),
   runEvents: (id: string) => request<RunEvent[]>(`/runs/${id}/events`),
   runDecisions: (id: string) => request<Decision[]>(`/runs/${id}/decisions`),
+  runTimeline: (id: string) => request<RunTimeline>(`/runs/${id}/timeline`),
   verifyRun: (id: string) => request<Verify>(`/runs/${id}/verify`),
   audit: () => request<AuditEntry[]>("/audit"),
   budgets: () => request<Budget[]>("/budgets"),

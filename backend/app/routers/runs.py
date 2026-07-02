@@ -153,6 +153,52 @@ async def run_events(
     return list(result.scalars().all())
 
 
+@router.get("/{run_id}/timeline")
+async def run_timeline(
+    run_id: uuid.UUID,
+    current: CurrentUser = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Cumulative cost/tokens over a run's events, plus the burn rate.
+
+    Powers the per-run cost timeline and burn-rate chart in the run drawer.
+    """
+    run = await _get_run(session, current, run_id)
+    result = await session.execute(
+        select(models.RunEvent)
+        .where(models.RunEvent.run_id == run_id)
+        .order_by(models.RunEvent.seq)
+    )
+    events = list(result.scalars().all())
+    t0 = events[0].ts if events else run.started_at
+    points: list[dict] = []
+    cum_micro = 0
+    cum_tokens = 0
+    for e in events:
+        cum_micro += e.cost_micro or 0
+        cum_tokens += int((e.tokens or {}).get("total", 0) or 0)
+        points.append({
+            "seq": e.seq,
+            "ts": e.ts.isoformat(),
+            "event_type": e.event_type,
+            "name": e.name,
+            "cost_micro": e.cost_micro or 0,
+            "cumulative_micro": cum_micro,
+            "cumulative_tokens": cum_tokens,
+            "elapsed_s": max(0.0, (e.ts - t0).total_seconds()),
+        })
+    duration_s = (events[-1].ts - t0).total_seconds() if len(events) > 1 else 0.0
+    burn = (cum_micro / 1_000_000) / (duration_s / 60) if duration_s > 0 else 0.0
+    return {
+        "run_id": str(run.id),
+        "points": points,
+        "total_cost_micro": cum_micro,
+        "total_tokens": cum_tokens,
+        "duration_s": duration_s,
+        "burn_rate_usd_per_min": burn,
+    }
+
+
 @router.get("/{run_id}/decisions", response_model=list[schemas.DecisionOut])
 async def run_decisions(
     run_id: uuid.UUID,

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, AuditEntry, Budget, Decision, EvalRun, getToken, Overview, Run, User } from "../lib/api";
+import { api, AuditEntry, Budget, BudgetAlert, Decision, EvalRun, getToken, Overview, Run, User } from "../lib/api";
 import { LiveMessage, useLive } from "../lib/ws";
 import { usd } from "../lib/format";
 import { AuditPanel, BudgetPanel, DecisionsPanel, EvalPanel, Kpis, RunsPanel } from "./panels";
 import RunDrawer from "./RunDrawer";
 import SiemPanel from "./SiemPanel";
+import AlertToasts, { ToastAlert } from "./AlertToasts";
 
 export default function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -14,8 +15,10 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [evals, setEvals] = useState<EvalRun[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<ToastAlert[]>([]);
 
   const refreshTimer = useRef<number | null>(null);
+  const alertId = useRef(0);
 
   const loadAll = useCallback(async () => {
     const [o, a, e] = await Promise.all([api.overview(), api.audit(), api.evals()]);
@@ -50,6 +53,9 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
         scheduleRefresh();
       } else if (m.type === "budget.updated") {
         setBudgets(m.budgets as Budget[]);
+      } else if (m.type === "budget.alert") {
+        const id = ++alertId.current;
+        setAlerts((prev) => [{ ...(m as unknown as BudgetAlert), id }, ...prev].slice(0, 6));
       } else if (m.type === "policy.decision") {
         setDecisions((prev) => [
           { tool: m.tool as string, server: "", decision: m.decision as string,
@@ -91,6 +97,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
         </div>
       </div>
       {selected && <RunDrawer runId={selected} onClose={() => setSelected(null)} />}
+      <AlertToasts alerts={alerts} onDismiss={(id) => setAlerts((p) => p.filter((a) => a.id !== id))} />
     </>
   );
 }

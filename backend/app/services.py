@@ -203,6 +203,19 @@ async def report_usage(
                  extra={"cost_usd": micro_to_usd(outcome.cost_micro)})
     await _broadcast_run(bus, current, run, "run.usage")
     await _broadcast_budget(bus, hub, current)
+    for alert in outcome.alert_events:
+        await _broadcast(bus, current, {
+            "type": "budget.alert",
+            "project": project.slug,
+            "kind": alert["kind"],
+            "message": alert["message"],
+            "scope_id": alert["scope_id"],
+            "spent_micro": alert["spent_micro"],
+            "limit_micro": alert["limit_micro"],
+            "fraction": alert["fraction"],
+            "run_id": str(run.id),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
 
     return schemas.UsageOutcome(
         cost_usd=micro_to_usd(outcome.cost_micro),

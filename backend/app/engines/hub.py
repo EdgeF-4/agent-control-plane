@@ -53,6 +53,9 @@ class SpendOutcome:
     allowed: bool
     state: str
     violations: list[dict]
+    # Full alert detail (threshold / cap / kill) fired by this charge, for the
+    # live feed and audit — richer than the bare ``alerts`` kinds above.
+    alert_events: list[dict]
 
 
 class EngineHub:
@@ -247,6 +250,18 @@ class EngineHub:
                     "fraction": v.fraction,
                 }
                 for v in decision.violations
+            ],
+            alert_events=[
+                {
+                    "kind": a.kind.value,
+                    "message": a.message,
+                    "budget": a.name,
+                    "scope_id": a.scope_id,
+                    "limit_micro": a.limit_micro,
+                    "spent_micro": a.spent_micro,
+                    "fraction": a.fraction,
+                }
+                for a in result.alerts
             ],
         )
 

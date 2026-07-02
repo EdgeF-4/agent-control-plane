@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, Decision, RunEvent, Verify } from "../lib/api";
-import { microToUsd, shortHash } from "../lib/format";
+import { api, Decision, RunEvent, RunTimeline, Verify } from "../lib/api";
+import { fmtDuration, microToUsd, shortHash, usd } from "../lib/format";
+import { AreaChart } from "./Charts";
 import { DecisionBadge } from "./StatusBadge";
 
 const GLYPH: Record<string, string> = {
@@ -11,16 +12,20 @@ const GLYPH: Record<string, string> = {
 export default function RunDrawer({ runId, onClose }: { runId: string; onClose: () => void }) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [timeline, setTimeline] = useState<RunTimeline | null>(null);
   const [verify, setVerify] = useState<Verify | null>(null);
   const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
     let live = true;
-    Promise.all([api.runEvents(runId), api.runDecisions(runId)]).then(([ev, dec]) => {
-      if (!live) return;
-      setEvents(ev);
-      setDecisions(dec);
-    });
+    Promise.all([api.runEvents(runId), api.runDecisions(runId), api.runTimeline(runId)]).then(
+      ([ev, dec, tl]) => {
+        if (!live) return;
+        setEvents(ev);
+        setDecisions(dec);
+        setTimeline(tl);
+      }
+    );
     return () => { live = false; };
   }, [runId]);
 
@@ -61,6 +66,24 @@ export default function RunDrawer({ runId, onClose }: { runId: string; onClose: 
             <div className="item"><div className="k">Cost</div><div className="v">{microToUsd(totalCost)}</div></div>
             <div className="item"><div className="k">Decisions</div><div className="v">{decisions.length}</div></div>
           </div>
+
+          {timeline && timeline.total_cost_micro > 0 && (
+            <div className="cost-timeline">
+              <div className="ct-head">
+                <span>Cost timeline</span>
+                <span className="sub">
+                  {timeline.duration_s >= 1
+                    ? `${usd(timeline.burn_rate_usd_per_min)}/min burn · ${fmtDuration(timeline.duration_s)}`
+                    : "recorded in one burst"}
+                </span>
+              </div>
+              <AreaChart values={timeline.points.map((p) => p.cumulative_micro / 1_000_000)} />
+              <div className="ct-foot">
+                <span>0</span>
+                <span>cumulative spend → {microToUsd(timeline.total_cost_micro)}</span>
+              </div>
+            </div>
+          )}
 
           {decisions.length > 0 && (
             <div style={{ marginBottom: 18 }}>
