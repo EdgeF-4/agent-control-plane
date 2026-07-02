@@ -122,9 +122,9 @@ async def seed(settings: Settings) -> None:
             ))
 
             # 4) Reliability: run the bundled suite twice and pin a baseline.
-            r1, _ = await asyncio.to_thread(hub.run_eval, _SUITE, _FIXTURES, "baseline")
+            r1, _ = await asyncio.to_thread(hub.run_eval, SUITE, FIXTURES, "baseline")
             await asyncio.to_thread(hub.set_eval_baseline, r1.suite_name, r1.run_id)
-            r2, comparison = await asyncio.to_thread(hub.run_eval, _SUITE, _FIXTURES, "nightly")
+            r2, comparison = await asyncio.to_thread(hub.run_eval, SUITE, FIXTURES, "nightly")
             for label, res, comp, base in (("baseline", r1, None, True), ("nightly", r2, comparison, False)):
                 session.add(models.EvalRun(
                     tenant_id=tenant.id, eval_run_id=res.run_id, suite_name=res.suite_name,
@@ -134,7 +134,13 @@ async def seed(settings: Settings) -> None:
                     failed=sum(1 for c in res.cases if not c.passed),
                     total=len(res.cases), is_baseline=base,
                     has_regressions=(comp.has_regressions if comp else None),
+                    data={"comparison": comp.to_dict() if comp else None},
                 ))
+            # 5) A daily schedule for the suite so the cadence is visible.
+            session.add(models.EvalSchedule(
+                tenant_id=tenant.id, suite_name=r1.suite_name, interval_minutes=1440,
+                enabled=True,
+            ))
             await session.commit()
         print("seed complete")
     finally:
@@ -142,8 +148,8 @@ async def seed(settings: Settings) -> None:
         await db.dispose()
 
 
-# Reuse the eval router's suite/fixtures so seeded and live evals match.
-from .routers.evals import _FIXTURES, _SUITE  # noqa: E402
+# Reuse the shared suite/fixtures so seeded and live evals match.
+from .eval_service import FIXTURES, SUITE  # noqa: E402
 
 
 def main() -> None:

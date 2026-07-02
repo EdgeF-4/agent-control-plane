@@ -93,6 +93,27 @@ export interface BudgetAlert {
   project: string; kind: string; message: string; scope_id: string;
   spent_micro: number; limit_micro: number; fraction: number; ts: string; run_id?: string;
 }
+export interface EvalSchedule {
+  id: string; suite_name: string; project_id: string | null;
+  interval_minutes: number; enabled: boolean; last_run_at: string | null; next_run_at: string;
+}
+export interface CaseDelta {
+  case_id: string; status: string; baseline_passed: boolean | null; current_passed: boolean | null;
+  score_delta: number; latency_delta_ms: number; cost_delta_usd: number;
+}
+export interface EvalComparison {
+  baseline_id: string; current_id: string; suite_name: string; suite_hash_changed: boolean;
+  summary: {
+    regressions: number; fixes: number; added: number; removed: number;
+    pass_rate_delta: number; mean_score_delta: number;
+    total_cost_delta_usd: number; mean_latency_delta_ms: number;
+  };
+  case_deltas: CaseDelta[];
+}
+export interface EvalDiff {
+  eval_run_id: string; suite_name: string; has_regressions: boolean | null;
+  comparison: EvalComparison | null;
+}
 export interface Overview {
   tenant: { id: string; slug: string; name: string };
   runs: { total: number; running: number; completed: number; killed: number; error: number };
@@ -117,7 +138,18 @@ export const api = {
   audit: () => request<AuditEntry[]>("/audit"),
   budgets: () => request<Budget[]>("/budgets"),
   evals: () => request<EvalRun[]>("/evals"),
-  runEval: () => request<unknown>("/evals/run", { method: "POST" }),
+  runEval: () => request<{ id: string }>("/evals/run", { method: "POST" }),
+  evalDiff: (id: string) => request<EvalDiff>(`/evals/${id}/diff`),
+  evalSchedules: () => request<EvalSchedule[]>("/evals/schedules"),
+  createEvalSchedule: (body: { suite_name?: string; project_slug?: string; interval_minutes: number; enabled: boolean }) =>
+    request<EvalSchedule>("/evals/schedules", { method: "POST", body: JSON.stringify(body) }),
+  deleteEvalSchedule: (id: string) => request<unknown>(`/evals/schedules/${id}`, { method: "DELETE" }),
+  runEvalSchedule: (id: string) =>
+    request<{ eval_id: string }>(`/evals/schedules/${id}/run-now`, { method: "POST" }),
+  setEvalGate: (slug: string, suite: string | null) =>
+    request<{ project: string; eval_gate_suite: string }>(`/evals/gate/${slug}`, {
+      method: "PUT", body: JSON.stringify({ suite_name: suite }),
+    }),
   siemStatus: () => request<SiemStatus>("/siem/status"),
   siemDlq: () => request<DlqEntry[]>("/siem/dlq"),
   siemTestSink: (name: string) =>

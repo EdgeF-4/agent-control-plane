@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import models, schemas
 from .deps import CurrentUser
 from .engines import EngineHub
+from .eval_service import assert_promotion_allowed
 from .live import EventBus
 
 
@@ -103,6 +104,8 @@ async def create_run(
     payload: schemas.RunCreate,
 ) -> models.Run:
     project = await _resolve_project_for_principal(session, current, payload.project_slug)
+    # Eval gate: refuse to promote new work while the gated suite is regressed.
+    await assert_promotion_allowed(session, current.tenant_id, project)
     external_run_id = f"{current.tenant.slug}__{project.slug}__{uuid.uuid4().hex[:12]}"
 
     sealed = await asyncio.to_thread(

@@ -67,6 +67,8 @@ class Settings(BaseModel):
     data_dir: str = "/data"
     engines: EnginesConfig = Field(default_factory=EnginesConfig)
     bootstrap: BootstrapConfig | None = None
+    # How often the background loop checks for due eval schedules (seconds).
+    eval_scheduler_seconds: int = 30
 
     def engine_path(self, *parts: str) -> str:
         """Resolve a path under ``data_dir`` and make sure its parent exists."""

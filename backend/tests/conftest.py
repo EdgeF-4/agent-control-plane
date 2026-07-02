@@ -25,6 +25,9 @@ def settings(tmp_path) -> Settings:
         auth={"jwt_secret": secrets.token_hex(32)},
         data_dir=str(tmp_path / "data"),
         engines={"policy": _POLICY},
+        # Keep the background eval scheduler dormant so schedule tests are
+        # deterministic; they drive run_due_schedules / run-now explicitly.
+        eval_scheduler_seconds=3600,
         bootstrap={
             "tenant_slug": "acme",
             "tenant_name": "Acme Corp",

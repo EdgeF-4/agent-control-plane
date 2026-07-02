@@ -84,6 +84,9 @@ class Project(Base):
     budget_period: Mapped[str] = mapped_column(String(16), default="monthly")
     budget_warn_threshold: Mapped[float] = mapped_column(Float, default=0.8)
     budget_latches_kill: Mapped[bool] = mapped_column(Boolean, default=True)
+    # When set, new runs are blocked while this suite's latest eval has a
+    # regression — the eval gate. Empty string means no gate.
+    eval_gate_suite: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     tenant: Mapped[Tenant] = relationship(back_populates="projects")
@@ -183,6 +186,26 @@ class PolicyDecision(Base):
     decision: Mapped[str] = mapped_column(String(16), index=True)  # allow | deny
     reason: Mapped[str] = mapped_column(Text, default="")
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EvalSchedule(Base):
+    """A recurring reliability-suite run.
+
+    Kept tenant-scoped; ``project_id`` is optional so a schedule can be tied to a
+    project (and its eval gate) or run tenant-wide.
+    """
+
+    __tablename__ = "eval_schedules"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    suite_name: Mapped[str] = mapped_column(String(200))
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class EvalRun(Base):

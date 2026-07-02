@@ -18,6 +18,7 @@ from ..deps import (
     get_session,
 )
 from ..engines import EngineHub
+from ..eval_service import EvalGateError
 from ..live import EventBus
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -66,6 +67,8 @@ async def create_run(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+    except EvalGateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
 
 
 @router.post("/ingest", status_code=status.HTTP_201_CREATED)
@@ -82,6 +85,8 @@ async def ingest_run(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
+    except EvalGateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
     return {
         "run": schemas.RunOut.model_validate(run).model_dump(mode="json"),
         "outcomes": [o.model_dump() for o in outcomes],

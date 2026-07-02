@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,9 +19,24 @@ from .bootstrap import bootstrap_tenant, refresh_ingest_keys, sync_budgets
 from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
+from .eval_service import run_due_schedules
 from .live import EventBus
 from .migrations import apply_migrations
 from .routers import audit, auth, budgets, evals, live, overview, projects, runs, siem
+
+_log = logging.getLogger("control_plane")
+
+
+async def _eval_scheduler(db: Database, hub: EngineHub, tick_seconds: int) -> None:
+    """Periodically run any due eval schedules; survives individual failures."""
+    while True:
+        await asyncio.sleep(max(1, tick_seconds))
+        try:
+            await run_due_schedules(db, hub, datetime.now(timezone.utc))
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # a bad run must never kill the loop
+            _log.exception("eval scheduler tick failed")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -42,9 +61,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await sync_budgets(db, hub)
         async with db.sessionmaker() as session:
             await refresh_ingest_keys(session, hub)
+
+        scheduler = asyncio.create_task(
+            _eval_scheduler(db, hub, settings.eval_scheduler_seconds)
+        )
         try:
             yield
         finally:
+            scheduler.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await scheduler
             hub.close()
             await db.dispose()
 

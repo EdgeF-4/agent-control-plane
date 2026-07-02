@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, AuditEntry, Budget, BudgetAlert, Decision, EvalRun, getToken, Overview, Run, User } from "../lib/api";
 import { LiveMessage, useLive } from "../lib/ws";
 import { usd } from "../lib/format";
-import { AuditPanel, BudgetPanel, DecisionsPanel, EvalPanel, Kpis, RunsPanel } from "./panels";
+import { AuditPanel, BudgetPanel, DecisionsPanel, Kpis, RunsPanel } from "./panels";
 import RunDrawer from "./RunDrawer";
 import SiemPanel from "./SiemPanel";
+import EvalsPanel from "./EvalsPanel";
 import AlertToasts, { ToastAlert } from "./AlertToasts";
 
 export default function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
@@ -91,7 +92,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
           <div className="col-8"><RunsPanel runs={runs} onSelect={setSelected} /></div>
           <div className="col-4"><BudgetPanel budgets={budgets} /></div>
           <div className="col-8"><AuditPanel entries={audit} /></div>
-          <div className="col-4"><EvalPanel evals={evals} /></div>
+          <div className="col-4"><EvalsPanel evals={evals} isAdmin={user.role === "admin"} onChanged={loadAll} /></div>
           <div className="col-6"><DecisionsPanel decisions={decisions} /></div>
           <div className="col-6"><SiemPanel isAdmin={user.role === "admin"} /></div>
         </div>

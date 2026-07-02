@@ -245,4 +245,30 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var
 .toast.bad .toast-glyph { color: var(--red); }
 .toast.ok { border-color: rgba(9,240,151,0.4); }
 .toast.ok .toast-glyph { color: var(--accent); }
+
+/* ------------------------------------------------------------------- evals */
+.linklike { background: none; border: none; color: var(--blue); cursor: pointer;
+  font-size: 12px; padding: 0 0 0 8px; }
+.diff { margin-top: 12px; border-top: 1px solid var(--border-soft); padding-top: 10px; }
+.diff-summary { display: flex; gap: 14px; font-size: 12px; margin-bottom: 8px; font-weight: 600; }
+.diff-summary .bad { color: var(--red); }
+.diff-summary .ok { color: var(--accent); }
+.diff-row { display: flex; align-items: center; gap: 9px; padding: 4px 0; }
+.case-status { margin-left: auto; font-size: 11px; text-transform: capitalize; }
+.case-status.bad { color: var(--red); }
+.case-status.ok { color: var(--accent); }
+.case-status.blue { color: var(--blue); }
+.case-status.gold { color: var(--gold); }
+.case-status.muted { color: var(--muted-2); }
+.schedules { margin-top: 14px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.sched-head { display: flex; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.sched-head .right { margin-left: auto; }
+.sched-add { display: flex; align-items: center; gap: 6px; }
+.sched-add input { width: 68px; background: #0a1018; border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 8px; color: var(--text); font-size: 12px; }
+.sched-row { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+.sched-row:last-child { border-bottom: none; }
+.sched-id { flex: 1; min-width: 0; }
+.sched-actions { display: flex; gap: 6px; }
+.sched-actions .btn { padding: 4px 9px; }
 .hint { color: var(--muted-2); font-size: 12px; margin-top: 16px; text-align: center; line-height: 1.5; }

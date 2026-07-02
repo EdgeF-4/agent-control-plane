@@ -1,4 +1,4 @@
-import { AuditEntry, Budget, Decision, EvalRun, Overview, Run } from "../lib/api";
+import { AuditEntry, Budget, Decision, Overview, Run } from "../lib/api";
 import { ago, microToUsd, pct, shortHash, usd } from "../lib/format";
 import { DecisionBadge, StatusBadge } from "./StatusBadge";
 
@@ -176,36 +176,3 @@ export function AuditPanel({ entries }: { entries: AuditEntry[] }) {
   );
 }
 
-export function EvalPanel({ evals }: { evals: EvalRun[] }) {
-  const latest = evals[0];
-  return (
-    <div className="panel">
-      <header><h2>Reliability</h2><span className="sub">offline regression suite</span></header>
-      <div className="body">
-        {!latest && <div className="empty">No eval runs yet.</div>}
-        {latest && (
-          <>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-              <div style={{ fontSize: 30, fontWeight: 700, color: latest.pass_rate >= 1 ? "var(--accent)" : "var(--gold)" }}>
-                {pct(latest.pass_rate)}
-              </div>
-              <div style={{ color: "var(--muted)" }}>
-                {latest.passed}/{latest.total} cases pass
-              </div>
-              <div style={{ marginLeft: "auto" }}>
-                {latest.has_regressions === true ? (
-                  <span className="pill-int bad">▼ regressions</span>
-                ) : (
-                  <span className="pill-int ok">✓ no regressions</span>
-                )}
-              </div>
-            </div>
-            <div style={{ color: "var(--muted-2)", fontSize: 12, marginTop: 10 }}>
-              suite “{latest.suite_name}” · {evals.length} run{evals.length === 1 ? "" : "s"} recorded
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}

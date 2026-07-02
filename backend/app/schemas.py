@@ -174,3 +174,27 @@ class VerifyResult(BaseModel):
     event_count: int
     broken_index: int | None = None
     reason: str | None = None
+
+
+# --- evals ----------------------------------------------------------------- #
+class EvalScheduleCreate(BaseModel):
+    suite_name: str = ""
+    project_slug: str = ""
+    interval_minutes: int = 1440
+    enabled: bool = True
+
+
+class EvalScheduleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    suite_name: str
+    project_id: uuid.UUID | None
+    interval_minutes: int
+    enabled: bool
+    last_run_at: datetime | None
+    next_run_at: datetime
+
+
+class EvalGateUpdate(BaseModel):
+    # Empty / null clears the gate.
+    suite_name: str | None = None
