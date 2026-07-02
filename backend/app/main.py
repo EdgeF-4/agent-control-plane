@@ -17,7 +17,7 @@ from .db import Database
 from .engines import EngineHub
 from .live import EventBus
 from .migrations import apply_migrations
-from .routers import audit, auth, budgets, evals, live, overview, projects, runs
+from .routers import audit, auth, budgets, evals, live, overview, projects, runs, siem
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -76,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(budgets.router, prefix=api)
     app.include_router(audit.router, prefix=api)
     app.include_router(evals.router, prefix=api)
+    app.include_router(siem.router, prefix=api)
     app.include_router(overview.router, prefix=api)
     app.include_router(live.router, prefix=api)
 

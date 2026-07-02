@@ -67,6 +67,20 @@ export interface EvalRun {
   is_baseline: boolean; has_regressions: boolean | null; finished_at: string | null;
 }
 export interface Verify { ok: boolean; event_count: number; broken_index: number | null; reason: string | null; }
+export interface SiemSink { name: string; type: string; enabled: boolean; }
+export interface SiemStats {
+  processed: number; batches: number; delivered: number;
+  dead_lettered: number; parse_errors: number;
+}
+export interface SiemPreset { type: string; label: string; description: string; config: Record<string, unknown>; }
+export interface SiemStatus {
+  sinks: SiemSink[]; stats: SiemStats; dlq_count: number;
+  redaction_enabled: boolean; presets: SiemPreset[];
+}
+export interface DlqEntry {
+  sink: string; error: string; attempts: number; failed_at: string; event_count: number;
+}
+export interface SinkTest { ok: boolean; detail: string; }
 export interface Overview {
   tenant: { id: string; slug: string; name: string };
   runs: { total: number; running: number; completed: number; killed: number; error: number };
@@ -91,4 +105,13 @@ export const api = {
   budgets: () => request<Budget[]>("/budgets"),
   evals: () => request<EvalRun[]>("/evals"),
   runEval: () => request<unknown>("/evals/run", { method: "POST" }),
+  siemStatus: () => request<SiemStatus>("/siem/status"),
+  siemDlq: () => request<DlqEntry[]>("/siem/dlq"),
+  siemTestSink: (name: string) =>
+    request<SinkTest>(`/siem/sinks/${encodeURIComponent(name)}/test`, { method: "POST" }),
+  siemReplay: (sink?: string) =>
+    request<{ replayed: number; failed: number; skipped: number }>(
+      `/siem/dlq/replay${sink ? `?sink=${encodeURIComponent(sink)}` : ""}`,
+      { method: "POST" }
+    ),
 };

@@ -4,6 +4,7 @@ import { LiveMessage, useLive } from "../lib/ws";
 import { usd } from "../lib/format";
 import { AuditPanel, BudgetPanel, DecisionsPanel, EvalPanel, Kpis, RunsPanel } from "./panels";
 import RunDrawer from "./RunDrawer";
+import SiemPanel from "./SiemPanel";
 
 export default function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -85,7 +86,8 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
           <div className="col-4"><BudgetPanel budgets={budgets} /></div>
           <div className="col-8"><AuditPanel entries={audit} /></div>
           <div className="col-4"><EvalPanel evals={evals} /></div>
-          <div className="col-12"><DecisionsPanel decisions={decisions} /></div>
+          <div className="col-6"><DecisionsPanel decisions={decisions} /></div>
+          <div className="col-6"><SiemPanel isAdmin={user.role === "admin"} /></div>
         </div>
       </div>
       {selected && <RunDrawer runId={selected} onClose={() => setSelected(null)} />}

@@ -25,6 +25,7 @@ from flight_recorder.recorder import RunLog
 
 # Audit/SIEM engine — normalize, redact, forward.
 from mcp_siem_bridge.pipeline import Pipeline
+from mcp_siem_bridge.sinks import SinkError
 
 # Policy engine — allow/deny decisions.
 from mcp_gateway.auth import Authenticator
@@ -383,6 +384,69 @@ class EngineHub:
             canonical = self.siem.process_event(event)
             self.siem.flush()
             return canonical
+
+    def siem_status(self) -> dict:
+        """Configured sinks, forwarding stats and dead-letter depth (passive)."""
+        with self._lock:
+            sinks = [
+                {"name": s.name, "type": s.type, "enabled": s.enabled}
+                for s in self.siem.sinks
+            ]
+            stats = self.siem.stats
+            return {
+                "sinks": sinks,
+                "stats": {
+                    "processed": stats.processed,
+                    "batches": stats.batches,
+                    "delivered": stats.delivered,
+                    "dead_lettered": stats.dead_lettered,
+                    "parse_errors": stats.parse_errors,
+                },
+                "dlq_count": self.siem.dlq.count(),
+                "redaction_enabled": bool(self.settings.engines.siem.get("redaction", {}).get("enabled", True)),
+            }
+
+    def siem_test_sink(self, name: str) -> dict:
+        """Run a sink's own connectivity self-test (an explicit operator action)."""
+        with self._lock:
+            sink = next((s for s in self.siem.sinks if s.name == name), None)
+            if sink is None:
+                return {"ok": False, "detail": f"no sink named {name!r}"}
+            result = sink.test()
+            return {"ok": bool(result.ok), "detail": result.detail}
+
+    def siem_dlq_entries(self, limit: int = 100) -> list[dict]:
+        """Summaries of dead-lettered batches awaiting replay (no raw payloads)."""
+        with self._lock:
+            entries = self.siem.dlq.list_entries()[:limit]
+            return [
+                {
+                    "sink": e.sink,
+                    "error": e.error,
+                    "attempts": e.attempts,
+                    "failed_at": e.failed_at,
+                    "event_count": len(e.events),
+                }
+                for e in entries
+            ]
+
+    def siem_dlq_replay(self, sink_filter: str | None = None, limit: int | None = None) -> dict:
+        """Re-deliver dead-lettered batches to their original sink."""
+        with self._lock:
+            sink_map = {s.name: s for s in self.siem.sinks}
+
+            def deliver(name: str, events: list) -> None:
+                sink = sink_map.get(name)
+                if sink is None:
+                    raise SinkError(f"no sink named {name!r} is currently configured")
+                sink.emit(events)
+
+            result = self.siem.dlq.replay(deliver, sink_filter=sink_filter, limit=limit)
+            return {
+                "replayed": result.replayed,
+                "failed": result.failed,
+                "skipped": result.skipped,
+            }
 
     # ------------------------------------------------------------------ #
     # Eval (reliability/regression)
