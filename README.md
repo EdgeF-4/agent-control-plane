@@ -28,7 +28,8 @@ it at your own log sink.
 ## What it does
 
 - **Live observability** — every agent run streams into a dark cockpit
-  dashboard over a WebSocket: status, tokens, cost, and a per-run timeline.
+  dashboard over a WebSocket: status, tokens, cost, a per-run cost timeline with
+  a burn-rate curve, and budget alerts that pop the moment a cap is crossed.
 - **Cost control with teeth** — per-project budgets in integer micro-dollars
   (no float drift). Cross a hard cap and the kill switch latches: further work
   is denied until someone with the right role releases it.
@@ -37,9 +38,28 @@ it at your own log sink.
 - **A tamper-evident audit trail** — every event in a run is sealed into a
   SHA-256 hash chain. Reorder, edit, insert, or delete a single event and
   verification reports exactly where the chain broke. "Show me everything that
-  agent did, and prove it wasn't edited" is a query, not a promise.
-- **Reliability tracking** — run a regression suite against a pinned baseline.
-  The bundled suite is fully offline, so it works in an air-gapped install.
+  agent did, and prove it wasn't edited" is a query, not a promise. The chain
+  survives a backend restart mid-run: it's rehydrated from the durable record,
+  so the hashes stay continuous across process boundaries.
+- **Agents authenticate themselves** — each project mints its own API keys, so
+  the agents and SDKs that report runs never touch an operator login. Only the
+  key's hash is stored; the plaintext is shown once.
+- **Audit forwarding you can watch** — see every configured SIEM sink, test its
+  reachability, watch delivery stats, and replay anything that dead-lettered,
+  right from the dashboard. Copy-paste presets for Splunk, Elasticsearch,
+  Datadog, a webhook, or a local file.
+- **Reliability with a gate** — run a regression suite against a pinned
+  baseline, on a schedule, and read the case-by-case diff. Put an *eval gate* on
+  a project and new runs are refused while that suite is regressed. The bundled
+  suite is fully offline, so it works in an air-gapped install.
+- **Admin without leaving the cockpit** — create tenants, users, and projects,
+  set budgets and gates, and manage API keys from an admin view.
+- **Real migrations** — the schema is owned by Alembic and brought to head on
+  startup, so it evolves cleanly in production instead of relying on first-run
+  table creation.
+
+Reporting a run from your own agent is a few lines — see the dependency-free
+[quickstart SDK](examples/sdk/).
 
 ## How it's built
 
@@ -48,27 +68,31 @@ engines, each of which owns its own authoritative store, and projects a single,
 multi-tenant, queryable view on top for the dashboard and API.
 
 ```
-                       Browser — dark cockpit dashboard (SPA)
-                                     │  HTTPS / JSON + WebSocket
-                       ┌─────────────▼──────────────┐
-                       │     Control Plane API        │  FastAPI, async
-                       │  auth · tenancy · ingest ·   │
-                       │  projections · live feed     │
-                       └──┬────┬────┬────┬────┬────────┘
+     Operators (dashboard, JWT)          Agents & SDKs (per-project API key)
+                     │                                   │
+                     └───────────────┬───────────────────┘
+                        HTTPS / JSON + WebSocket
+                       ┌─────────────▼───────────────────┐
+                       │       Control Plane API           │  FastAPI, async
+                       │  auth · tenancy · api-key ingest · │
+                       │  projections · live feed ·         │
+                       │  Alembic migrations · eval sched   │
+                       └──┬────┬────┬────┬────┬─────────────┘
               ┌───────────┘    │    │    │    └───────────┐
               ▼                ▼    ▼    ▼                ▼
         ┌──────────┐   ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  cost    │   │  recorder  │ │ audit/   │ │ policy   │ │  eval    │
-        │ caps +   │   │ hash-chain │ │ SIEM     │ │ allow/   │ │ regress  │
-        │ kill sw  │   │ run log    │ │ forward  │ │ deny     │ │ baseline │
-        │ (SQLite) │   │ (JSONL)    │ │(file/…)  │ │ (rules)  │ │ (SQLite) │
+        │  cost    │   │  recorder  │ │ audit/   │ │ gateway  │ │  eval    │
+        │ caps +   │   │ hash-chain │ │ SIEM     │ │ policy + │ │ regress  │
+        │ kill sw  │   │ run log    │ │ forward  │ │ auth     │ │ + gate   │
+        │ (SQLite) │   │ (JSONL)    │ │ + DLQ    │ │ (rules)  │ │ (SQLite) │
         └──────────┘   └────────────┘ └──────────┘ └──────────┘ └──────────┘
                                      │
                        ┌─────────────▼──────────────┐
                        │   PostgreSQL — unified       │
-                       │   projection (tenants,       │
-                       │   users, projects, runs,     │
-                       │   events, decisions, evals)  │
+                       │   projection (tenants, users,│
+                       │   projects, runs, events,    │
+                       │   decisions, api_keys, evals,│
+                       │   eval_schedules)            │
                        └──────────────────────────────┘
 ```
 
@@ -95,6 +119,10 @@ React + TypeScript + Vite · Docker Compose.
   request can only ever touch its own tenant's data and engine scopes.
 - **Tamper-evident by construction**, so the audit trail holds up to scrutiny
   rather than asking for trust.
+
+The full write-up — data residency, egress, the tamper-evidence threat model and
+its limits, retention, and RBAC — is in
+[docs/self-hosting-compliance.md](docs/self-hosting-compliance.md).
 
 ## Quick start (Docker)
 
@@ -154,16 +182,21 @@ make build           # type-check and build the dashboard
 
 The suite ingests runs, trips a real budget cap, asserts the kill switch and the
 allow/deny decisions, tampers with an on-disk record and confirms verification
-catches it, and exercises the live WebSocket.
+catches it, keeps the hash chain intact across a simulated restart, authenticates
+an agent with a project API key, checks migrations build the schema with no
+drift, drives the SIEM DLQ and replay, streams budget alerts over the WebSocket,
+runs and gates evals, and exercises the tenant/user/project admin routes.
 
 ## Project layout
 
 ```
 backend/    FastAPI app — config, data model, auth, engine adapters, routers, tests
+backend/alembic/  migration history (schema is brought to head on startup)
 frontend/   React + TypeScript cockpit dashboard
 deploy/     Dockerfiles + nginx config
 scripts/    dev-setup, vendor-engines, up, publish
-docs/        architecture notes + diagram
+examples/   dependency-free quickstart SDK
+docs/       architecture, self-host/compliance guarantees, diagram
 ```
 
 ## License
