@@ -43,17 +43,31 @@ it at your own log sink.
   agent did, and prove it wasn't edited" is a query, not a promise. The chain
   survives a backend restart mid-run: it's rehydrated from the durable record,
   so the hashes stay continuous across process boundaries.
+- **Prove it later, off-box** — on a cadence, a Merkle root over every run's head
+  hash is pinned to an append-only, itself-hash-chained anchor file (and,
+  optionally, a write-once S3-compatible bucket). Once a root is anchored, editing
+  any anchored run no longer matches it — tamper-*evidence* becomes closer to
+  non-repudiation. `control-plane anchor-verify` checks the anchor log and flags
+  any run that has drifted since.
 - **Agents authenticate themselves** — each project mints its own API keys, so
   the agents and SDKs that report runs never touch an operator login. Only the
-  key's hash is stored; the plaintext is shown once.
+  key's hash is stored; the plaintext is shown once. Already run an identity
+  provider? Point ingest at its **JWKS** and agents authenticate with an OAuth2
+  bearer JWT instead (RS256 with rotation-aware key caching, or HS256).
 - **Audit forwarding you can watch** — see every configured SIEM sink, test its
   reachability, watch delivery stats, and replay anything that dead-lettered,
   right from the dashboard. Copy-paste presets for Splunk, Elasticsearch,
   Datadog, a webhook, or a local file.
 - **Reliability with a gate** — run a regression suite against a pinned
   baseline, on a schedule, and read the case-by-case diff. Put an *eval gate* on
-  a project and new runs are refused while that suite is regressed. The bundled
-  suite is fully offline, so it works in an air-gapped install.
+  a project and new runs are refused while that suite is regressed. Suites run
+  against pluggable adapters: a fully-offline **golden-answers** adapter (so it
+  works in an air-gapped install) or an **http** adapter that scores a real model
+  endpoint you point it at. Add your own suites in `config.json`.
+- **Scale horizontally** — run more than one backend instance behind a load
+  balancer and point them at a shared Redis: the live dashboard feed and budget
+  alerts fan out across every instance, delivered exactly once. No Redis? It
+  degrades gracefully to single-instance, in-process delivery.
 - **Admin without leaving the cockpit** — create tenants, users, and projects,
   set budgets and gates, and manage API keys from an admin view.
 - **Real migrations** — the schema is owned by Alembic and brought to head on
@@ -61,7 +75,7 @@ it at your own log sink.
   table creation.
 
 Reporting a run from your own agent is a few lines — see the dependency-free
-[quickstart SDK](examples/sdk/).
+quickstart SDKs for [Python](examples/sdk/) and [TypeScript](examples/sdk-ts/).
 
 ## How it's built
 
@@ -70,32 +84,33 @@ engines, each of which owns its own authoritative store, and projects a single,
 multi-tenant, queryable view on top for the dashboard and API.
 
 ```
-     Operators (dashboard, JWT)          Agents & SDKs (per-project API key)
-                     │                                   │
-                     └───────────────┬───────────────────┘
-                        HTTPS / JSON + WebSocket
-                       ┌─────────────▼───────────────────┐
-                       │       Control Plane API           │  FastAPI, async
-                       │  auth · tenancy · api-key ingest · │
-                       │  projections · live feed ·         │
-                       │  Alembic migrations · eval sched   │
-                       └──┬────┬────┬────┬────┬─────────────┘
-              ┌───────────┘    │    │    │    └───────────┐
-              ▼                ▼    ▼    ▼                ▼
-        ┌──────────┐   ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  cost    │   │  recorder  │ │ audit/   │ │ gateway  │ │  eval    │
-        │ caps +   │   │ hash-chain │ │ SIEM     │ │ policy + │ │ regress  │
-        │ kill sw  │   │ run log    │ │ forward  │ │ auth     │ │ + gate   │
-        │ (SQLite) │   │ (JSONL)    │ │ + DLQ    │ │ (rules)  │ │ (SQLite) │
-        └──────────┘   └────────────┘ └──────────┘ └──────────┘ └──────────┘
-                                     │
-                       ┌─────────────▼──────────────┐
-                       │   PostgreSQL — unified       │
-                       │   projection (tenants, users,│
-                       │   projects, runs, events,    │
-                       │   decisions, api_keys, evals,│
-                       │   eval_schedules)            │
-                       └──────────────────────────────┘
+   Operators (dashboard, JWT)     Agents & SDKs (Py / TS)
+             │             per-project API key ── or ── OAuth2 JWT (your IdP/JWKS)
+             └───────────────┬───────────────────┘
+                HTTPS / JSON + WebSocket
+               ┌─────────────▼───────────────────┐        ┌───────────────┐
+               │       Control Plane API           │◀──────▶│  Redis bus    │
+               │  auth · tenancy · api-key +        │  live  │ (multi-      │
+               │  JWKS ingest · projections ·       │  feed  │  instance;    │
+               │  live feed · migrations · eval ·   │        │  optional)    │
+               │  scheduler · WORM anchoring        │        └───────────────┘
+               └──┬────┬────┬────┬────┬─────────────┘
+      ┌───────────┘    │    │    │    └───────────┐
+      ▼                ▼    ▼    ▼                ▼
+┌──────────┐   ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│  cost    │   │  recorder  │ │ audit/   │ │ gateway  │ │  eval    │
+│ caps +   │   │ hash-chain │ │ SIEM     │ │ policy + │ │ regress  │
+│ kill sw  │   │ run log    │ │ forward  │ │ auth +   │ │ + gate + │
+│ (SQLite) │   │ (JSONL)    │ │ + DLQ    │ │ JWKS     │ │ adapters │
+└──────────┘   └─────┬──────┘ └──────────┘ └──────────┘ └──────────┘
+                     │ Merkle root
+              ┌──────▼───────┐        ┌──────────────────────────────┐
+              │ anchor log    │        │   PostgreSQL — unified        │
+              │ (append-only, │        │   projection (tenants, users, │
+              │  hash-chained;│        │   projects, runs, events,     │
+              │  → S3 option) │        │   decisions, api_keys, evals, │
+              └───────────────┘        │   eval_schedules)             │
+                                       └───────────────────────────────┘
 ```
 
 Each engine guarantees something the projection cannot — integer-exact cost
@@ -106,7 +121,7 @@ against the hash chain on demand. The full design is in
 [docs/architecture.md](docs/architecture.md).
 
 **Stack:** Python 3.12 · FastAPI (async) · SQLAlchemy 2.0 · PostgreSQL ·
-React + TypeScript + Vite · Docker Compose.
+optional Redis (multi-instance bus) · React + TypeScript + Vite · Docker Compose.
 
 ## Self-host & compliance posture
 
@@ -185,19 +200,25 @@ make build           # type-check and build the dashboard
 The suite ingests runs, trips a real budget cap, asserts the kill switch and the
 allow/deny decisions, tampers with an on-disk record and confirms verification
 catches it, keeps the hash chain intact across a simulated restart, authenticates
-an agent with a project API key, checks migrations build the schema with no
-drift, drives the SIEM DLQ and replay, streams budget alerts over the WebSocket,
-runs and gates evals, and exercises the tenant/user/project admin routes.
+an agent with a project API key **and with an external-IdP JWT verified against a
+mock JWKS** (expiry/audience/signature/rotation), checks migrations build the
+schema with no drift, drives the SIEM DLQ and replay, streams budget alerts over
+the WebSocket, **fans those frames across two bus instances**, runs and gates
+evals **through the golden and http adapters** (the latter against a live local
+model server), **anchors the hash chain and detects run drift** (plus a SigV4 S3
+upload), and exercises the tenant/user/project admin routes.
 
 ## Project layout
 
 ```
 backend/    FastAPI app — config, data model, auth, engine adapters, routers, tests
+backend/app/evals/  eval adapters (golden + http) and the suite registry
+backend/app/anchor.py  WORM Merkle anchoring (+ SigV4 S3 upload)
 backend/alembic/  migration history (schema is brought to head on startup)
 frontend/   React + TypeScript cockpit dashboard
 deploy/     Dockerfiles + nginx config
 scripts/    dev-setup, vendor-engines, up, publish
-examples/   dependency-free quickstart SDK
+examples/   dependency-free quickstart SDKs (sdk/ Python, sdk-ts/ TypeScript)
 docs/       architecture, self-host/compliance guarantees, diagram
 ```
 
