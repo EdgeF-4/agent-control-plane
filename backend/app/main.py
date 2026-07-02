@@ -60,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         await bootstrap_tenant(settings, db)
         await sync_budgets(db, hub)
+        hub.configure_ingest_oauth(settings.ingest.oauth2)
         async with db.sessionmaker() as session:
             await refresh_ingest_keys(session, hub)
 

@@ -27,9 +27,14 @@ from flight_recorder.recorder import RunLog
 from mcp_siem_bridge.pipeline import Pipeline
 from mcp_siem_bridge.sinks import SinkError
 
-# Policy engine — allow/deny decisions.
-from mcp_gateway.auth import Authenticator
+# Policy + auth engine — allow/deny decisions and credential verification.
+from mcp_gateway.auth import (
+    Authenticator,
+    OAuth2Verifier,
+    build_jwks_key_store,
+)
 from mcp_gateway.config import ApiKeyRecord, PolicyConfig, PolicyRule
+from mcp_gateway.errors import ConfigError
 from mcp_gateway.identity import ClientIdentity
 from mcp_gateway.policy import PolicyEngine
 
@@ -42,6 +47,69 @@ from agent_eval.store import Store as EvalStore
 from agent_eval.suite import suite_from_dict
 
 from ..config import Settings
+
+
+def _credential_from_headers(headers) -> str | None:
+    """Pull the raw credential from headers, matching the gateway's own rules
+    (``X-API-Key`` wins, else ``Authorization: Bearer``/``ApiKey``)."""
+
+    def _get(name: str):
+        getter = getattr(headers, "get", None)
+        if getter is not None:
+            value = getter(name)
+            if value is not None:
+                return value
+        try:
+            for key, value in headers.items():
+                if key.lower() == name.lower():
+                    return value
+        except AttributeError:
+            pass
+        return None
+
+    api_key = _get("x-api-key")
+    if api_key:
+        return api_key.strip()
+    authorization = _get("authorization")
+    if not authorization:
+        return None
+    scheme, _, credential = authorization.partition(" ")
+    if scheme.lower() in ("bearer", "apikey") and credential:
+        return credential.strip()
+    return None
+
+
+def _project_claim_from_headers(headers, claim: str) -> str | None:
+    """Read one claim from the request's bearer JWT (already signature-verified)."""
+    import base64
+    import json
+
+    token = _credential_from_headers(headers)
+    if not token or token.count(".") != 2:
+        return None
+    try:
+        segment = token.split(".")[1]
+        segment += "=" * (-len(segment) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(segment))
+    except Exception:
+        return None
+    value = payload.get(claim)
+    return str(value) if value is not None else None
+
+
+@dataclass
+class IngestIdentity:
+    """Who authenticated a run-ingest request, and how.
+
+    ``auth_method`` is ``"api_key"`` (a per-project key) or ``"oauth2"`` (a JWT
+    from an external IdP). ``project_hint`` is a project slug carried by a JWT's
+    optional project claim, used to scope the token to one project.
+    """
+
+    client_id: str
+    auth_method: str
+    roles: tuple[str, ...] = ()
+    project_hint: str | None = None
 
 
 @dataclass
@@ -64,7 +132,11 @@ class EngineHub:
         self._lock = threading.RLock()
         self._runs: dict[str, RunLog] = {}
         # Ingest authenticator, composed from the gateway engine. Rebuilt from the
-        # database whenever project API keys change; empty until keys are synced.
+        # database whenever project API keys change, and from config when the
+        # optional OAuth2/JWKS verifier is configured. Empty until keys are synced.
+        self._ingest_api_key_records: tuple[ApiKeyRecord, ...] = ()
+        self._ingest_oauth: OAuth2Verifier | None = None
+        self._ingest_project_claim: str | None = None
         self._ingest_authenticator = Authenticator(api_keys=())
 
         # --- cost engine -------------------------------------------------
@@ -149,30 +221,94 @@ class EngineHub:
     # ------------------------------------------------------------------ #
     # Ingest authentication (per-project API keys)
     # ------------------------------------------------------------------ #
+    def _rebuild_ingest_authenticator(self) -> None:
+        """Compose the api-key records and the optional OAuth2 verifier. Locked."""
+        self._ingest_authenticator = Authenticator(
+            api_keys=self._ingest_api_key_records, oauth2=self._ingest_oauth
+        )
+
     def set_ingest_keys(self, keys: list[dict]) -> None:
         """Rebuild the ingest authenticator from the active API-key records.
 
         Each record maps a key digest to its own id (used as the client id) and
-        the ``agent`` role. Revoked keys are simply left out of the set.
+        the ``agent`` role. Revoked keys are simply left out of the set. Any
+        configured OAuth2 verifier is preserved alongside the keys.
         """
         records = tuple(
             ApiKeyRecord(client_id=k["client_id"], key_sha256=k["key_sha256"], roles=("agent",))
             for k in keys
         )
         with self._lock:
-            self._ingest_authenticator = Authenticator(api_keys=records)
+            self._ingest_api_key_records = records
+            self._rebuild_ingest_authenticator()
 
-    def authenticate_ingest(self, headers) -> str | None:
-        """Return the authenticating key's client id, or ``None``.
+    def configure_ingest_oauth(self, cfg) -> None:
+        """Enable (or disable) JWT ingest from an external IdP.
+
+        Builds the gateway's :class:`OAuth2Verifier` — RS256 keys resolve from a
+        JWKS file or endpoint (cached, rotation-aware) and HS256 from a shared
+        secret in the environment — and composes it into the ingest
+        authenticator alongside the per-project API keys.
+        """
+        verifier: OAuth2Verifier | None = None
+        project_claim: str | None = None
+        if cfg is not None and getattr(cfg, "enabled", False):
+            verifier = self._build_ingest_oauth(cfg)
+            project_claim = cfg.project_claim or None
+        with self._lock:
+            self._ingest_oauth = verifier
+            self._ingest_project_claim = project_claim
+            self._rebuild_ingest_authenticator()
+
+    @staticmethod
+    def _build_ingest_oauth(cfg) -> OAuth2Verifier:
+        common = dict(
+            issuer=cfg.issuer,
+            audience=cfg.audience,
+            client_id_claim=cfg.client_id_claim,
+            roles_claim=cfg.roles_claim,
+            leeway_seconds=cfg.leeway_seconds,
+        )
+        if cfg.algorithm == "RS256":
+            if not (cfg.jwks_url or cfg.jwks_path):
+                raise ConfigError(
+                    "ingest oauth2 RS256 requires 'jwks_url' or 'jwks_path'"
+                )
+            # build_jwks_key_store reads cfg.jwks_path / jwks_url / jwks_cache_seconds.
+            return OAuth2Verifier(
+                algorithm="RS256", key_store=build_jwks_key_store(cfg), **common
+            )
+        secret = os.environ.get(cfg.hs256_secret_env or "")
+        if not secret:
+            raise ConfigError(
+                "ingest oauth2 HS256 is enabled but its secret env var is empty"
+            )
+        return OAuth2Verifier(algorithm="HS256", secret=secret, **common)
+
+    def authenticate_ingest(self, headers) -> "IngestIdentity | None":
+        """Authenticate a run-ingest request, returning who and how, or ``None``.
 
         Composes the gateway's :class:`Authenticator`, so header parsing
-        (``Authorization: Bearer``/``ApiKey`` and ``X-API-Key``) and the
-        constant-time digest match are exactly the gateway's.
+        (``Authorization: Bearer``/``ApiKey`` and ``X-API-Key``), the
+        constant-time api-key digest match, and JWT verification (signature,
+        expiry, issuer, audience) are all the gateway's. For a JWT, the optional
+        project claim is read from the already-verified token.
         """
         with self._lock:
             authenticator = self._ingest_authenticator
+            project_claim = self._ingest_project_claim
         identity, _reason = authenticator.authenticate(headers)
-        return identity.client_id if identity is not None else None
+        if identity is None:
+            return None
+        project_hint = None
+        if identity.auth_method == "oauth2" and project_claim:
+            project_hint = _project_claim_from_headers(headers, project_claim)
+        return IngestIdentity(
+            client_id=identity.client_id,
+            auth_method=identity.auth_method,
+            roles=tuple(identity.roles),
+            project_hint=project_hint,
+        )
 
     # ------------------------------------------------------------------ #
     # Cost

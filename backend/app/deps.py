@@ -100,36 +100,89 @@ async def get_ingest_principal(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     session: AsyncSession = Depends(get_session),
 ) -> CurrentUser:
-    """Authenticate a run-ingest request as either a project API key or a user.
+    """Authenticate a run-ingest request as a project API key, an IdP JWT, or a user.
 
-    A project API key is tried first (via the gateway-composed authenticator on
-    the hub); it yields a principal scoped to that one project and attributed to
-    an ``agent`` actor. If no key matches, this falls back to the normal user
-    JWT, so the dashboard and existing tooling keep working unchanged.
+    The hub's gateway-composed authenticator is tried first: a per-project API
+    key yields a principal scoped to that one project, and an external-IdP JWT
+    (when OAuth2/JWKS ingest is enabled) yields a principal in the configured
+    tenant — scoped to the token's project claim if it carries one. Both are
+    attributed to an ``agent`` actor. If neither matches, this falls back to the
+    normal user JWT, so the dashboard and existing tooling keep working.
     """
     hub: EngineHub = request.app.state.hub
-    client_id = hub.authenticate_ingest(request.headers)
-    if client_id is not None:
-        try:
-            key_id = uuid.UUID(client_id)
-        except ValueError:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid api key identity")
-        api_key = await session.get(models.ApiKey, key_id)
-        if api_key is None or not api_key.active:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown or revoked api key")
-        tenant = await session.get(models.Tenant, api_key.tenant_id)
-        if tenant is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown tenant")
-        api_key.last_used_at = models.utcnow()
-        await session.commit()
-        # A transient actor for attribution; never persisted as a user row.
-        agent_user = models.User(
-            id=api_key.id, tenant_id=api_key.tenant_id,
-            email=f"agentkey:{api_key.key_prefix}", name=api_key.name or "agent key",
-            role="agent", password_hash="",
-        )
-        return CurrentUser(
-            user=agent_user, tenant=tenant, kind="api_key",
-            scoped_project_id=api_key.project_id,
-        )
+    ident = hub.authenticate_ingest(request.headers)
+    if ident is not None:
+        if ident.auth_method == "api_key":
+            return await _api_key_principal(session, ident.client_id)
+        if ident.auth_method == "oauth2":
+            return await _oauth2_principal(request, session, ident)
     return await get_current_user(request, credentials, session)
+
+
+async def _api_key_principal(session: AsyncSession, client_id: str) -> CurrentUser:
+    try:
+        key_id = uuid.UUID(client_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid api key identity")
+    api_key = await session.get(models.ApiKey, key_id)
+    if api_key is None or not api_key.active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown or revoked api key")
+    tenant = await session.get(models.Tenant, api_key.tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown tenant")
+    api_key.last_used_at = models.utcnow()
+    await session.commit()
+    # A transient actor for attribution; never persisted as a user row.
+    agent_user = models.User(
+        id=api_key.id, tenant_id=api_key.tenant_id,
+        email=f"agentkey:{api_key.key_prefix}", name=api_key.name or "agent key",
+        role="agent", password_hash="",
+    )
+    return CurrentUser(
+        user=agent_user, tenant=tenant, kind="api_key",
+        scoped_project_id=api_key.project_id,
+    )
+
+
+async def _oauth2_principal(request: Request, session: AsyncSession, ident) -> CurrentUser:
+    settings: Settings = request.app.state.settings
+    cfg = settings.ingest.oauth2
+    if not cfg.tenant_slug:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "oauth2 ingest is not bound to a tenant (set ingest.oauth2.tenant_slug)",
+        )
+    result = await session.execute(
+        select(models.Tenant).where(models.Tenant.slug == cfg.tenant_slug)
+    )
+    tenant = result.scalar_one_or_none()
+    if tenant is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "unknown ingest tenant")
+
+    scoped_project_id: uuid.UUID | None = None
+    if ident.project_hint:
+        proj = await session.execute(
+            select(models.Project).where(
+                models.Project.tenant_id == tenant.id,
+                models.Project.slug == ident.project_hint,
+            )
+        )
+        project = proj.scalar_one_or_none()
+        if project is None:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"token project claim '{ident.project_hint}' does not match any project",
+            )
+        scoped_project_id = project.id
+
+    # A transient actor for attribution; never persisted as a user row. The
+    # id is synthetic; the IdP subject is carried in the actor's email/name.
+    agent_user = models.User(
+        id=uuid.uuid4(), tenant_id=tenant.id,
+        email=f"oauth2:{ident.client_id}", name=ident.client_id or "oauth2 agent",
+        role="agent", password_hash="",
+    )
+    return CurrentUser(
+        user=agent_user, tenant=tenant, kind="oauth2",
+        scoped_project_id=scoped_project_id,
+    )
