@@ -36,6 +36,7 @@ async def bootstrap_tenant(settings: Settings, db: Database) -> None:
                 password_hash=hash_password(bs.admin_password),
                 name="Administrator",
                 role="admin",
+                superadmin=True,
             )
         )
         await session.commit()

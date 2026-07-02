@@ -87,6 +87,47 @@ async def create_project(
     return project
 
 
+@router.patch("/{slug}", response_model=schemas.ProjectOut)
+async def update_project(
+    slug: str,
+    payload: schemas.ProjectUpdate,
+    current: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+    hub: EngineHub = Depends(get_hub),
+) -> models.Project:
+    project = await _project_or_404(session, current, slug)
+    if payload.name is not None:
+        project.name = payload.name
+    if payload.budget_usd is not None:
+        project.budget_limit_micro = usd_to_micro(payload.budget_usd)
+    if payload.budget_warn_threshold is not None:
+        project.budget_warn_threshold = payload.budget_warn_threshold
+    if payload.budget_latches_kill is not None:
+        project.budget_latches_kill = payload.budget_latches_kill
+    # Mirror the change into the cost engine (set_budget is an upsert).
+    hub.ensure_budget(
+        budget_id=str(project.id), name=f"{project.name} cap",
+        scope_id=project.cost_scope_id, limit_micro=project.budget_limit_micro,
+        period=project.budget_period, warn_threshold=project.budget_warn_threshold,
+        latch=project.budget_latches_kill,
+    )
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+@router.delete("/{slug}")
+async def delete_project(
+    slug: str,
+    current: CurrentUser = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    project = await _project_or_404(session, current, slug)
+    await session.delete(project)
+    await session.commit()
+    return {"deleted": True, "slug": slug}
+
+
 # --------------------------------------------------------------------------- #
 # Per-project ingest API keys
 # --------------------------------------------------------------------------- #

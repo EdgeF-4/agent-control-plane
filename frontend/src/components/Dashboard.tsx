@@ -7,6 +7,7 @@ import RunDrawer from "./RunDrawer";
 import SiemPanel from "./SiemPanel";
 import EvalsPanel from "./EvalsPanel";
 import AlertToasts, { ToastAlert } from "./AlertToasts";
+import AdminPage from "./AdminPage";
 
 export default function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -17,6 +18,7 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
   const [evals, setEvals] = useState<EvalRun[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<ToastAlert[]>([]);
+  const [view, setView] = useState<"cockpit" | "admin">("cockpit");
 
   const refreshTimer = useRef<number | null>(null);
   const alertId = useRef(0);
@@ -72,38 +74,47 @@ export default function Dashboard({ user, onLogout }: { user: User; onLogout: ()
 
   useLive(getToken() ?? "", onMessage);
 
-  if (!overview) {
-    return (
-      <>
-        <TopBar user={user} onLogout={onLogout} spend={0} />
-        <div className="wrap"><div className="empty">Loading control plane…</div></div>
-      </>
-    );
-  }
+  const isAdmin = user.role === "admin";
 
   return (
     <>
-      <TopBar user={user} onLogout={onLogout} spend={overview.total_spend_usd} />
-      <div className="wrap">
-        <div style={{ marginBottom: 16 }}>
-          <Kpis o={{ ...overview, budgets, recent_denied_decisions: overview.recent_denied_decisions }} />
+      <TopBar
+        user={user}
+        onLogout={onLogout}
+        spend={overview?.total_spend_usd ?? 0}
+        view={view}
+        onToggleView={() => setView((v) => (v === "admin" ? "cockpit" : "admin"))}
+        isAdmin={isAdmin}
+      />
+      {view === "admin" ? (
+        <AdminPage user={user} />
+      ) : !overview ? (
+        <div className="wrap"><div className="empty">Loading control plane…</div></div>
+      ) : (
+        <div className="wrap">
+          <div style={{ marginBottom: 16 }}>
+            <Kpis o={{ ...overview, budgets, recent_denied_decisions: overview.recent_denied_decisions }} />
+          </div>
+          <div className="grid">
+            <div className="col-8"><RunsPanel runs={runs} onSelect={setSelected} /></div>
+            <div className="col-4"><BudgetPanel budgets={budgets} /></div>
+            <div className="col-8"><AuditPanel entries={audit} /></div>
+            <div className="col-4"><EvalsPanel evals={evals} isAdmin={isAdmin} onChanged={loadAll} /></div>
+            <div className="col-6"><DecisionsPanel decisions={decisions} /></div>
+            <div className="col-6"><SiemPanel isAdmin={isAdmin} /></div>
+          </div>
         </div>
-        <div className="grid">
-          <div className="col-8"><RunsPanel runs={runs} onSelect={setSelected} /></div>
-          <div className="col-4"><BudgetPanel budgets={budgets} /></div>
-          <div className="col-8"><AuditPanel entries={audit} /></div>
-          <div className="col-4"><EvalsPanel evals={evals} isAdmin={user.role === "admin"} onChanged={loadAll} /></div>
-          <div className="col-6"><DecisionsPanel decisions={decisions} /></div>
-          <div className="col-6"><SiemPanel isAdmin={user.role === "admin"} /></div>
-        </div>
-      </div>
+      )}
       {selected && <RunDrawer runId={selected} onClose={() => setSelected(null)} />}
       <AlertToasts alerts={alerts} onDismiss={(id) => setAlerts((p) => p.filter((a) => a.id !== id))} />
     </>
   );
 }
 
-function TopBar({ user, onLogout, spend }: { user: User; onLogout: () => void; spend: number }) {
+function TopBar({ user, onLogout, spend, view, onToggleView, isAdmin }: {
+  user: User; onLogout: () => void; spend: number;
+  view: "cockpit" | "admin"; onToggleView: () => void; isAdmin: boolean;
+}) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -111,6 +122,11 @@ function TopBar({ user, onLogout, spend }: { user: User; onLogout: () => void; s
         Agent Control Plane <small>self-hosted</small>
       </div>
       <div className="spacer" />
+      {isAdmin && (
+        <button className="btn ghost" onClick={onToggleView} style={{ marginRight: 8 }}>
+          {view === "admin" ? "← Cockpit" : "Admin"}
+        </button>
+      )}
       <div className="tenant" style={{ marginRight: 4 }}>
         spend <b style={{ color: "var(--accent)" }}>{usd(spend)}</b>
       </div>

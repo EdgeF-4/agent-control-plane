@@ -64,6 +64,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(200))
     name: Mapped[str] = mapped_column(String(200), default="")
     role: Mapped[str] = mapped_column(String(32), default="member")  # admin | member
+    # A superadmin may create and see across tenants; scoped to the bootstrap user.
+    superadmin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     tenant: Mapped[Tenant] = relationship(back_populates="users")

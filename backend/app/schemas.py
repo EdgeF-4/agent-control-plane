@@ -26,7 +26,43 @@ class UserOut(BaseModel):
     email: str
     name: str
     role: str
+    superadmin: bool = False
     tenant_id: uuid.UUID
+
+
+# --- admin ----------------------------------------------------------------- #
+class TenantCreate(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    name: str
+    admin_email: str
+    admin_password: str = Field(min_length=8)
+
+
+class TenantOut(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    user_count: int
+    project_count: int
+
+
+class UserCreate(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    name: str = ""
+    role: str = "member"  # admin | member
+
+
+class UserUpdate(BaseModel):
+    role: str | None = None
+    password: str | None = Field(default=None, min_length=8)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    budget_usd: float | None = None
+    budget_warn_threshold: float | None = None
+    budget_latches_kill: bool | None = None
 
 
 class TokenResponse(BaseModel):
@@ -54,6 +90,7 @@ class ProjectOut(BaseModel):
     budget_period: str
     budget_warn_threshold: float
     budget_latches_kill: bool
+    eval_gate_suite: str = ""
 
 
 # --- api keys -------------------------------------------------------------- #

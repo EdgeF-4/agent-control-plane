@@ -54,6 +54,10 @@ class CurrentUser:
     def is_admin(self) -> bool:
         return self.user.role == "admin"
 
+    @property
+    def is_superadmin(self) -> bool:
+        return bool(getattr(self.user, "superadmin", False))
+
 
 async def get_current_user(
     request: Request,
@@ -82,6 +86,12 @@ async def get_current_user(
 async def require_admin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not current.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "admin role required")
+    return current
+
+
+async def require_superadmin(current: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not current.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "superadmin role required")
     return current
 
 

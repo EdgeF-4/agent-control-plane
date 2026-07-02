@@ -38,7 +38,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 // --- types -------------------------------------------------------------- //
-export interface User { id: string; email: string; name: string; role: string; tenant_id: string; }
+export interface User { id: string; email: string; name: string; role: string; superadmin?: boolean; tenant_id: string; }
+export interface Project {
+  id: string; slug: string; name: string; budget_limit_micro: number; budget_period: string;
+  budget_warn_threshold: number; budget_latches_kill: boolean; eval_gate_suite: string;
+}
+export interface ApiKey {
+  id: string; name: string; key_prefix: string;
+  created_at: string; last_used_at: string | null; revoked_at: string | null;
+}
+export interface ApiKeyCreated extends ApiKey { key: string; }
+export interface Tenant { id: string; slug: string; name: string; user_count: number; project_count: number; }
 export interface Budget {
   budget_id: string; name: string; scope_id: string; limit_micro: number;
   spent_micro: number; period: string; state: string; fraction: number;
@@ -159,4 +169,25 @@ export const api = {
       `/siem/dlq/replay${sink ? `?sink=${encodeURIComponent(sink)}` : ""}`,
       { method: "POST" }
     ),
+  // admin
+  projects: () => request<Project[]>("/projects"),
+  createProject: (body: { slug: string; name: string; budget_usd: number }) =>
+    request<Project>("/projects", { method: "POST", body: JSON.stringify(body) }),
+  updateProject: (slug: string, body: Partial<{ name: string; budget_usd: number; budget_latches_kill: boolean }>) =>
+    request<Project>(`/projects/${slug}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteProject: (slug: string) => request<unknown>(`/projects/${slug}`, { method: "DELETE" }),
+  projectKeys: (slug: string) => request<ApiKey[]>(`/projects/${slug}/keys`),
+  createKey: (slug: string, name: string) =>
+    request<ApiKeyCreated>(`/projects/${slug}/keys`, { method: "POST", body: JSON.stringify({ name }) }),
+  revokeKey: (slug: string, id: string) =>
+    request<unknown>(`/projects/${slug}/keys/${id}`, { method: "DELETE" }),
+  users: () => request<User[]>("/admin/users"),
+  createUser: (body: { email: string; password: string; name: string; role: string }) =>
+    request<User>("/admin/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (id: string, body: { role?: string; password?: string }) =>
+    request<User>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteUser: (id: string) => request<unknown>(`/admin/users/${id}`, { method: "DELETE" }),
+  tenants: () => request<Tenant[]>("/admin/tenants"),
+  createTenant: (body: { slug: string; name: string; admin_email: string; admin_password: string }) =>
+    request<Tenant>("/admin/tenants", { method: "POST", body: JSON.stringify(body) }),
 };

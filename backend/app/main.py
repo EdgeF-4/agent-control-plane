@@ -22,7 +22,7 @@ from .engines import EngineHub
 from .eval_service import run_due_schedules
 from .live import EventBus
 from .migrations import apply_migrations
-from .routers import audit, auth, budgets, evals, live, overview, projects, runs, siem
+from .routers import admin, audit, auth, budgets, evals, live, overview, projects, runs, siem
 
 _log = logging.getLogger("control_plane")
 
@@ -103,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(audit.router, prefix=api)
     app.include_router(evals.router, prefix=api)
     app.include_router(siem.router, prefix=api)
+    app.include_router(admin.router, prefix=api)
     app.include_router(overview.router, prefix=api)
     app.include_router(live.router, prefix=api)
 
