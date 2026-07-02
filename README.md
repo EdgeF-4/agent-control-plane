@@ -1,5 +1,7 @@
 # Agent Control Plane
 
+[![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
+
 A self-hosted control plane for teams running automated agents in production.
 One place to see what your agents did, what it cost, what was allowed, and to
 **prove the record wasn't tampered with** — without sending any of it to
