@@ -134,6 +134,35 @@ def test_audit_endpoint_and_overview(client, auth):
     assert overview["audit_event_count"] >= 3
 
 
+def test_run_survives_backend_restart_midflight(client, auth):
+    _make_project(client, auth, "research", "Research", 50.0)
+    # Open a run and record one usage report.
+    run = client.post(
+        "/api/v1/runs", headers=auth,
+        json={"project_slug": "research", "agent_name": "long-runner"},
+    ).json()
+    rid = run["id"]
+    client.post(f"/api/v1/runs/{rid}/usage", headers=auth,
+                json={"model": "m", "input_tokens": 100, "output_tokens": 40, "cost_usd": 0.05})
+
+    # Simulate a backend restart: the in-memory RunLog registry is gone, but the
+    # tamper-evident record on disk survives.
+    client.app.state.hub._runs.clear()
+
+    # Continue the same run after the "restart".
+    client.post(f"/api/v1/runs/{rid}/usage", headers=auth,
+                json={"model": "m", "input_tokens": 60, "output_tokens": 20, "cost_usd": 0.03})
+    client.post(f"/api/v1/runs/{rid}/tool-call", headers=auth,
+                json={"server": "web", "tool": "search"})
+    client.post(f"/api/v1/runs/{rid}/complete", headers=auth, json={"status": "completed"})
+
+    # The chain across the restart boundary verifies as one unbroken record.
+    v = client.get(f"/api/v1/runs/{rid}/verify", headers=auth).json()
+    assert v["ok"] is True
+    # run_start + 2 usage + tool_call + run_end = 5 events, all in one chain.
+    assert v["event_count"] == 5
+
+
 def test_eval_run_and_baseline(client, auth):
     r = client.post("/api/v1/evals/run", headers=auth)
     assert r.status_code == 201, r.text

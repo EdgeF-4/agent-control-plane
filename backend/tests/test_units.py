@@ -89,3 +89,28 @@ def test_recorder_chain_detects_tampering(tmp_path):
     path.write_text("\n".join(lines) + "\n")
     assert hub.verify_run(rid)["ok"] is False
     hub.close()
+
+
+def test_recorder_resumes_chain_across_restart(tmp_path):
+    # Open a run and record into it, then drop all in-process state — the same
+    # thing a backend restart does to an in-flight run.
+    hub = _hub(tmp_path)
+    rid = "t1__alpha__resume01"
+    hub.open_run(rid, input={"x": 1})
+    hub.emit(rid, "model_response", {"text": "before restart"},
+             tokens={"prompt": 1, "completion": 1}, cost_usd=0.01)
+    before = hub.verify_run(rid)
+    assert before["ok"] is True
+    hub.close()
+
+    # A fresh hub over the same data dir has no live RunLog for this run.
+    hub2 = _hub(tmp_path)
+    assert rid not in hub2._runs
+    # Continuing the run rehydrates the cursor and keeps one unbroken chain.
+    hub2.emit(rid, "tool_call", {"name": "search"}, name="search")
+    hub2.end_run(rid, status="ok")
+
+    after = hub2.verify_run(rid)
+    assert after["ok"] is True                             # chain intact
+    assert after["event_count"] == before["event_count"] + 2  # tool_call + run_end
+    hub2.close()

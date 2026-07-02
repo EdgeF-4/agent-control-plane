@@ -20,6 +20,7 @@ from cost_governor.config import Config as CostConfig
 
 # Recorder engine — tamper-evident, hash-chained run timeline.
 import flight_recorder as fr
+from flight_recorder.hashchain import GENESIS_HASH
 from flight_recorder.recorder import RunLog
 
 # Audit/SIEM engine — normalize, redact, forward.
@@ -290,8 +291,39 @@ class EngineHub:
     def _get_run(self, external_run_id: str) -> RunLog:
         with self._lock:
             run = self._runs.get(external_run_id)
-        if run is None:
-            raise KeyError(f"run {external_run_id!r} is not open")
+            if run is None:
+                # The recorder records in-process, so a backend restart loses the
+                # live RunLog. Rehydrate its chain cursor from the durable on-disk
+                # record so a run opened before the restart keeps one unbroken
+                # hash chain instead of restarting from the genesis hash.
+                run = self._resume_run(external_run_id)
+            if run is None:
+                raise KeyError(
+                    f"run {external_run_id!r} is not open and has no recorded events"
+                )
+            return run
+
+    def _resume_run(self, external_run_id: str) -> RunLog | None:
+        """Reopen an existing run and restore its seq/prev_hash/bytes cursor.
+
+        Must be called with ``self._lock`` held. Returns ``None`` when there is
+        no on-disk record to continue (a genuinely unknown run).
+        """
+        events = fr.load_events(external_run_id, config=self._recorder_config)
+        if not events:
+            return None
+        run = self.recorder.open_run(run_id=external_run_id, force=True)
+        # Continue the chain exactly where the persisted record left off.
+        run._seq = len(events)
+        run._prev_hash = events[-1].get("hash", GENESIS_HASH)
+        try:
+            run._bytes = os.path.getsize(run.path) if run.path else 0
+        except OSError:  # pragma: no cover - file vanished between load and stat
+            run._bytes = 0
+        # Preserve a prior size-cap truncation so we don't append past it.
+        if isinstance(events[-1].get("payload"), dict) and events[-1]["payload"].get("truncated"):
+            run._truncated = True
+        self._runs[external_run_id] = run
         return run
 
     def verify_run(self, external_run_id: str) -> dict:
