@@ -34,6 +34,7 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
+examples/sdk-ts/dist/
 *.local
 
 # Editor / OS
