@@ -16,6 +16,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
 from .live import EventBus
+from .migrations import apply_migrations
 from .routers import audit, auth, budgets, evals, live, overview, projects, runs
 
 
@@ -25,8 +26,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         os.makedirs(settings.data_dir, exist_ok=True)
-        db = Database(settings.database.dsn())
-        await db.create_all()
+        dsn = settings.database.dsn()
+        db = Database(dsn)
+        # Bring the projection store to head. Migrations own the schema now.
+        await apply_migrations(dsn)
         hub = EngineHub(settings)
         bus = EventBus()
 

@@ -17,6 +17,7 @@ dependencies = [
     "aiosqlite>=0.19",
     "pydantic>=2.6",
     "bcrypt>=4.1",
+    "alembic>=1.13",
 ]
 
 # The control plane composes five engine packages. They install from the local

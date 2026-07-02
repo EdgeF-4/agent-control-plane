@@ -19,6 +19,7 @@ from .db import Database
 from .deps import CurrentUser
 from .engines import EngineHub
 from .live import EventBus
+from .migrations import apply_migrations
 
 
 async def _ensure_project(session, hub, current, *, slug, name, budget_usd, warn=0.8) -> models.Project:
@@ -48,8 +49,9 @@ async def _ensure_project(session, hub, current, *, slug, name, budget_usd, warn
 
 
 async def seed(settings: Settings) -> None:
-    db = Database(settings.database.dsn())
-    await db.create_all()
+    dsn = settings.database.dsn()
+    db = Database(dsn)
+    await apply_migrations(dsn)
     hub = EngineHub(settings)
     bus = EventBus()
     await bootstrap_tenant(settings, db)

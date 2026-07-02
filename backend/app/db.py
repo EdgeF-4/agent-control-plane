@@ -37,11 +37,6 @@ class Database:
             self.engine, expire_on_commit=False, class_=AsyncSession
         )
 
-    async def create_all(self) -> None:
-        """Create tables directly (used for tests and first-run convenience)."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
     async def dispose(self) -> None:
         await self.engine.dispose()
 
