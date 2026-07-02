@@ -531,6 +531,11 @@ class EngineHub:
     def summarize_run(self, external_run_id: str) -> dict:
         return fr.summarize(self.load_run_events(external_run_id))
 
+    @property
+    def recorder_config(self) -> dict:
+        """The recorder's resolved config (log dir + caps) — used for anchoring."""
+        return dict(self._recorder_config)
+
     # ------------------------------------------------------------------ #
     # Audit / SIEM forwarding
     # ------------------------------------------------------------------ #
