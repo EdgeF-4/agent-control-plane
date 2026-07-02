@@ -55,6 +55,36 @@
       ]
     }
   },
+  "bus": {
+    "backend": "memory",
+    "redis_url": "redis://redis:6379/0",
+    "channel_prefix": "acp"
+  },
+  "ingest": {
+    "oauth2": {
+      "enabled": false,
+      "algorithm": "RS256",
+      "jwks_url": "https://idp.example.com/.well-known/jwks.json",
+      "jwks_path": null,
+      "jwks_cache_seconds": 300,
+      "issuer": "https://idp.example.com/",
+      "audience": "agent-control-plane",
+      "client_id_claim": "sub",
+      "roles_claim": "roles",
+      "project_claim": "acp_project",
+      "tenant_slug": "acme"
+    }
+  },
+  "anchor": {
+    "enabled": true,
+    "interval_seconds": 3600,
+    "s3_endpoint_url": null,
+    "s3_region": "us-east-1",
+    "s3_bucket": null,
+    "s3_prefix": "anchors",
+    "s3_access_key_env": null,
+    "s3_secret_key_env": null
+  },
   "bootstrap": {
     "tenant_slug": "acme",
     "tenant_name": "Acme Corp",

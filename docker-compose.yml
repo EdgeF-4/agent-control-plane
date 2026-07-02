@@ -23,12 +23,24 @@ services:
       timeout: 3s
       retries: 20
 
+  # Shared live-event bus. Point config.json's bus.redis_url at this to fan the
+  # dashboard feed across multiple backend instances. A single instance ignores it.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   backend:
     build:
       context: .
       dockerfile: deploy/backend.Dockerfile
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./config.json:/config/config.json:ro

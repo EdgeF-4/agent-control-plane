@@ -20,7 +20,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
 from .eval_service import run_due_schedules
-from .live import EventBus
+from .live import build_bus
 from .migrations import apply_migrations
 from .routers import admin, audit, auth, budgets, evals, live, overview, projects, runs, siem
 
@@ -50,7 +50,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Bring the projection store to head. Migrations own the schema now.
         await apply_migrations(dsn)
         hub = EngineHub(settings)
-        bus = EventBus()
+        bus = build_bus(settings)
+        await bus.start()
 
         app.state.settings = settings
         app.state.db = db
@@ -71,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             scheduler.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await scheduler
+            await bus.close()
             hub.close()
             await db.dispose()
 

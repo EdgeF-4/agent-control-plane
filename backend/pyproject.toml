@@ -18,6 +18,9 @@ dependencies = [
     "pydantic>=2.6",
     "bcrypt>=4.1",
     "alembic>=1.13",
+    # Only imported when the live bus is configured for Redis. A missing server
+    # (or this package) degrades gracefully to in-process, single-instance delivery.
+    "redis>=5.0",
 ]
 
 # The control plane composes five engine packages. They install from the local
