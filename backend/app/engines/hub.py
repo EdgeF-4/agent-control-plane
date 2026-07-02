@@ -39,14 +39,15 @@ from mcp_gateway.identity import ClientIdentity
 from mcp_gateway.policy import PolicyEngine
 
 # Eval engine — reliability/regression history.
-from agent_eval.adapters.mock import MockAdapter
-from agent_eval.config import AdapterConfig, Config as EvalConfig, Pricing
+from agent_eval.config import Config as EvalConfig, Pricing
 from agent_eval.regression import compare_runs
 from agent_eval.runner import run_suite
 from agent_eval.store import Store as EvalStore
 from agent_eval.suite import suite_from_dict
 
 from ..config import Settings
+from ..evals.adapters import build_eval_adapter, labeling_config
+from ..evals.suites import builtin_suites
 
 
 def _credential_from_headers(headers) -> str | None:
@@ -194,6 +195,10 @@ class EngineHub:
         # The eval store's SQLite connection is thread-bound, so each call
         # opens its own against this path (it runs inside ``asyncio.to_thread``).
         self._eval_store_path = settings.engine_path("eval", "history.db")
+        # Named suites (built-in + config-defined), resolved by the scheduler,
+        # gate, and routes. Seeded with the offline built-ins so a bare hub can
+        # run reliability checks; ``set_eval_suites`` adds config-defined ones.
+        self._eval_suites: dict[str, dict] = {s["name"]: dict(s) for s in builtin_suites()}
 
     # ------------------------------------------------------------------ #
     # Policy
@@ -602,16 +607,64 @@ class EngineHub:
     # ------------------------------------------------------------------ #
     # Eval (reliability/regression)
     # ------------------------------------------------------------------ #
-    def run_eval(self, suite_dict: dict, fixtures: dict, label: str | None = None):
-        suite = suite_from_dict(suite_dict)
-        adapter_cfg = AdapterConfig(type="mock", model="offline")
-        cfg = EvalConfig(suite="inline", adapter=adapter_cfg, pricing=Pricing())
-        adapter = MockAdapter(adapter_cfg, fixtures=fixtures)
-        result = run_suite(cfg, suite, adapter, label=label)
+    def set_eval_suites(self, specs: list[dict]) -> None:
+        """Register the named suites the scheduler, gate, and routes resolve."""
+        with self._lock:
+            self._eval_suites = {s["name"]: dict(s) for s in specs if s.get("name")}
+
+    def eval_suite_names(self) -> list[str]:
+        with self._lock:
+            return list(self._eval_suites)
+
+    def eval_suites_meta(self) -> list[dict]:
+        """Name, adapter type, case count, and whether each suite is runnable."""
+        with self._lock:
+            out = []
+            for name, spec in self._eval_suites.items():
+                adapter = spec.get("adapter") or {}
+                atype = adapter.get("type", "golden")
+                # An http suite needs a configured endpoint to actually run.
+                runnable = atype != "http" or bool(adapter.get("base_url"))
+                out.append({
+                    "name": name, "adapter": atype,
+                    "cases": len(spec.get("cases") or []), "runnable": runnable,
+                })
+            return out
+
+    def _resolve_eval_suite(self, suite) -> dict:
+        if isinstance(suite, str):
+            with self._lock:
+                spec = self._eval_suites.get(suite)
+            if spec is None:
+                raise KeyError(f"unknown eval suite {suite!r}")
+            return spec
+        return suite  # already a spec dict
+
+    def run_eval(self, suite, label: str | None = None):
+        """Run a named (or inline) suite through its adapter; record + diff.
+
+        ``suite`` is a registered suite name or a full spec dict. The adapter is
+        built from the spec (golden/http/…); scoring, storage, and the baseline
+        regression diff are the eval engine's.
+        """
+        spec = self._resolve_eval_suite(suite)
+        engine_suite = suite_from_dict({
+            "name": spec["name"],
+            "version": spec.get("version", "1"),
+            "cases": spec["cases"],
+        })
+        adapter = build_eval_adapter(spec.get("adapter") or {}, base_dir=self.settings.data_dir)
+        cfg = EvalConfig(
+            suite="inline",
+            adapter=labeling_config(spec.get("adapter") or {}),
+            pricing=Pricing.from_dict(spec.get("pricing") or {}),
+            seed=spec.get("seed"),
+        )
+        result = run_suite(cfg, engine_suite, adapter, label=label)
         store = EvalStore(self._eval_store_path)
         store.save_run(result)
         comparison = None
-        baseline = store.get_baseline(suite.name)
+        baseline = store.get_baseline(engine_suite.name)
         if baseline is not None and baseline.run_id != result.run_id:
             comparison = compare_runs(baseline, result)
         return result, comparison

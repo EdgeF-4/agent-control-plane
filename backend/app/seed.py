@@ -18,6 +18,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .deps import CurrentUser
 from .engines import EngineHub
+from .evals import default_suite_name, load_suites
 from .live import EventBus
 from .migrations import apply_migrations
 
@@ -53,6 +54,7 @@ async def seed(settings: Settings) -> None:
     db = Database(dsn)
     await apply_migrations(dsn)
     hub = EngineHub(settings)
+    hub.set_eval_suites(load_suites(settings))
     bus = EventBus()
     await bootstrap_tenant(settings, db)
     try:
@@ -122,9 +124,10 @@ async def seed(settings: Settings) -> None:
             ))
 
             # 4) Reliability: run the bundled suite twice and pin a baseline.
-            r1, _ = await asyncio.to_thread(hub.run_eval, SUITE, FIXTURES, "baseline")
+            suite_name = default_suite_name()
+            r1, _ = await asyncio.to_thread(hub.run_eval, suite_name, "baseline")
             await asyncio.to_thread(hub.set_eval_baseline, r1.suite_name, r1.run_id)
-            r2, comparison = await asyncio.to_thread(hub.run_eval, SUITE, FIXTURES, "nightly")
+            r2, comparison = await asyncio.to_thread(hub.run_eval, suite_name, "nightly")
             for label, res, comp, base in (("baseline", r1, None, True), ("nightly", r2, comparison, False)):
                 session.add(models.EvalRun(
                     tenant_id=tenant.id, eval_run_id=res.run_id, suite_name=res.suite_name,
@@ -146,10 +149,6 @@ async def seed(settings: Settings) -> None:
     finally:
         hub.close()
         await db.dispose()
-
-
-# Reuse the shared suite/fixtures so seeded and live evals match.
-from .eval_service import FIXTURES, SUITE  # noqa: E402
 
 
 def main() -> None:

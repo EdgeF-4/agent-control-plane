@@ -17,9 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import models, schemas
 from ..deps import CurrentUser, get_current_user, get_hub, get_session, require_admin
 from ..engines import EngineHub
-from ..eval_service import SUITE, run_and_record
+from ..eval_service import run_and_record
+from ..evals.suites import default_suite_name
 
 router = APIRouter(prefix="/evals", tags=["evals"])
+
+
+@router.get("/suites")
+async def list_suites(
+    current: CurrentUser = Depends(get_current_user),
+    hub: EngineHub = Depends(get_hub),
+) -> list[dict]:
+    """Available reliability suites: name, adapter type, case count, runnable."""
+    return hub.eval_suites_meta()
 
 
 @router.get("")
@@ -53,14 +63,21 @@ async def list_evals(
 
 @router.post("/run", status_code=status.HTTP_201_CREATED)
 async def run_eval(
+    suite: str | None = None,
     current: CurrentUser = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
     hub: EngineHub = Depends(get_hub),
 ) -> dict:
-    row, _comparison = await run_and_record(session, hub, tenant_id=current.tenant_id)
+    if suite and suite not in hub.eval_suite_names():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown suite '{suite}'")
+    row, _comparison = await run_and_record(
+        session, hub, tenant_id=current.tenant_id, suite_name=suite,
+        label=f"manual:{suite or default_suite_name()}",
+    )
     return {
         "id": str(row.id),
         "eval_run_id": row.eval_run_id,
+        "suite_name": row.suite_name,
         "pass_rate": row.pass_rate,
         "passed": row.passed,
         "failed": row.failed,
@@ -135,6 +152,7 @@ async def create_schedule(
     payload: schemas.EvalScheduleCreate,
     current: CurrentUser = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
+    hub: EngineHub = Depends(get_hub),
 ) -> models.EvalSchedule:
     project_id = None
     if payload.project_slug:
@@ -148,10 +166,13 @@ async def create_schedule(
         if project is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
         project_id = project.id
+    suite_name = payload.suite_name or default_suite_name()
+    if suite_name not in hub.eval_suite_names():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown suite '{suite_name}'")
     schedule = models.EvalSchedule(
         tenant_id=current.tenant_id,
         project_id=project_id,
-        suite_name=payload.suite_name or SUITE["name"],
+        suite_name=suite_name,
         interval_minutes=max(1, payload.interval_minutes),
         enabled=payload.enabled,
         next_run_at=datetime.now(timezone.utc),
@@ -174,6 +195,7 @@ async def run_schedule_now(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "schedule not found")
     row, _ = await run_and_record(
         session, hub, tenant_id=schedule.tenant_id, project_id=schedule.project_id,
+        suite_name=schedule.suite_name or None,
         label=f"manual:{schedule.suite_name}",
     )
     schedule.last_run_at = datetime.now(timezone.utc)

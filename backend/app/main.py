@@ -20,6 +20,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
 from .eval_service import run_due_schedules
+from .evals import load_suites
 from .live import build_bus
 from .migrations import apply_migrations
 from .routers import admin, audit, auth, budgets, evals, live, overview, projects, runs, siem
@@ -61,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await bootstrap_tenant(settings, db)
         await sync_budgets(db, hub)
         hub.configure_ingest_oauth(settings.ingest.oauth2)
+        hub.set_eval_suites(load_suites(settings))
         async with db.sessionmaker() as session:
             await refresh_ingest_keys(session, hub)
 
