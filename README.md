@@ -2,10 +2,27 @@
 
 [![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
 
-A self-hosted control plane for teams running automated agents in production.
-One place to see what your agents did, what it cost, what was allowed, and to
-**prove the record wasn't tampered with** — without sending any of it to
-someone else's cloud.
+A **vendor-neutral**, self-hosted control plane for teams running automated
+agents in production — governance, cost control, and a tamper-evident audit
+trail for *any* LLM or agent stack, on infrastructure you own.
+
+A wave of self-hosted agent gateways has arrived, but most are built around a
+single vendor's coding CLI: sign-on, per-seat cost, and spend caps for that one
+tool. This is the control plane for everything *else* you actually run — many
+agents, more than one model vendor, and teams or clients that have to stay
+isolated from each other. What sets it apart:
+
+- **Vendor-neutral by design** — report a run from any model or agent framework
+  in a few lines (Python/TypeScript SDK, or an OAuth2 JWT from your own IdP).
+  Nothing here is tied to one vendor's CLI.
+- **Multi-tenant projects, not per-seat** — tenants → projects → RBAC, so a
+  single install cleanly isolates many teams or clients; every row carries a
+  tenant id.
+- **An audit trail you can prove** — every event is sealed in a SHA-256 hash
+  chain and Merkle-anchored off-box, so it re-verifies independently. "Show me
+  what that agent did, and prove it wasn't edited" is a query, not a promise.
+- **Reliability gates, not just spend caps** — pin an eval baseline and new runs
+  are refused while a project's suite is regressed.
 
 ![Dashboard](docs/dashboard.png)
 
@@ -76,6 +93,38 @@ it at your own log sink.
 
 Reporting a run from your own agent is a few lines — see the dependency-free
 quickstart SDKs for [Python](examples/sdk/) and [TypeScript](examples/sdk-ts/).
+
+## How this compares
+
+Full honesty: if your team lives entirely inside one vendor's coding CLI, that
+vendor's own self-hosted gateway is the simpler choice. You get sign-on, per-seat
+cost attribution, and spend caps wired natively to the tool, with first-party
+support. I'd reach for it in that case and not build a thing.
+
+This control plane is for the messier reality most teams have: several agent
+stacks, more than one model vendor, home-grown automations, and clients or teams
+that must stay walled off from one another.
+
+|                  | Single-vendor gateway     | This control plane                                        |
+|------------------|---------------------------|-----------------------------------------------------------|
+| Scope            | One vendor's coding CLI   | Any LLM or agent stack (SDK or JWT ingest)                |
+| Isolation        | Per-user seats            | Multi-tenant: tenants → projects → RBAC                   |
+| Cost control     | Spend caps                | Integer-exact caps + a latching kill switch               |
+| Audit trail      | Access + usage logs       | SHA-256 hash chain + off-box Merkle anchor, re-verifiable |
+| Reliability      | —                         | Eval regression gate refuses regressed runs               |
+| Policy           | —                         | Per-tool allow/deny decisions, each with a reason         |
+| Operator sign-on | Turnkey SSO               | JWT login + RBAC (no turnkey enterprise SSO yet)          |
+| Footprint        | One container + Postgres  | Compose: Postgres + API + dashboard, optional Redis       |
+
+*(Compared against a single-vendor gateway's stated scope — governance for one
+CLI; that feature set may evolve, and turnkey SSO plus a smaller footprint are
+genuine advantages there.)*
+
+**Pick the single-vendor gateway** when that one CLI is your whole agent surface
+and turnkey SSO plus seat-level billing is what you need. **Pick this** when you
+run more than one thing, need tenant isolation, or have to *prove* — to an
+auditor, a client, or yourself — exactly what an agent did and that the record
+was never edited.
 
 ## How it's built
 
