@@ -51,6 +51,66 @@ class EnginesConfig(BaseModel):
     recorder: dict = Field(default_factory=dict)
     siem: dict = Field(default_factory=dict)
     policy: dict = Field(default_factory=lambda: {"default": "allow", "rules": []})
+    # Reliability-eval suites and adapter wiring (phase 3). Operators can add
+    # their own suites (e.g. an http adapter pointing at their model endpoint).
+    eval: dict = Field(default_factory=dict)
+
+
+class BusConfig(BaseModel):
+    """Live event bus. ``memory`` is in-process (single instance); ``redis``
+    shares the feed across every instance via Redis pub/sub."""
+
+    backend: str = "memory"
+    redis_url: str | None = None
+    channel_prefix: str = "acp"
+
+
+class IngestOAuthConfig(BaseModel):
+    """Accept external-IdP JWTs for run ingest, alongside per-project API keys.
+
+    Composes the gateway engine's OAuth2 verifier. RS256 keys resolve from a
+    JWKS file or endpoint (cached, rotation-aware); HS256 uses a shared secret
+    read from ``hs256_secret_env`` so the secret never lives in this file.
+    """
+
+    enabled: bool = False
+    algorithm: str = "RS256"  # RS256 (JWKS) | HS256 (shared secret)
+    jwks_url: str | None = None
+    jwks_path: str | None = None
+    jwks_cache_seconds: int = 300
+    hs256_secret_env: str | None = None
+    issuer: str | None = None
+    audience: str | None = None
+    client_id_claim: str = "sub"
+    roles_claim: str = "roles"
+    # Optional claim naming the project slug a token is allowed to ingest into.
+    project_claim: str | None = None
+    leeway_seconds: int = 30
+    # JWT-authenticated agents are attributed to this tenant (by slug).
+    tenant_slug: str | None = None
+
+
+class IngestConfig(BaseModel):
+    oauth2: IngestOAuthConfig = Field(default_factory=IngestOAuthConfig)
+
+
+class AnchorConfig(BaseModel):
+    """WORM anchoring of the recorder hash-chain (phase 3).
+
+    Periodically pins a Merkle root over every run's head hash to an append-only,
+    itself-hash-chained local file, and optionally to an S3-compatible bucket,
+    moving the audit trail from tamper-evident toward non-repudiation.
+    """
+
+    enabled: bool = True
+    interval_seconds: int = 3600
+    # S3-compatible target (MinIO, R2, S3…). Empty ``endpoint_url`` disables it.
+    s3_endpoint_url: str | None = None
+    s3_region: str = "us-east-1"
+    s3_bucket: str | None = None
+    s3_prefix: str = "anchors"
+    s3_access_key_env: str | None = None
+    s3_secret_key_env: str | None = None
 
 
 class BootstrapConfig(BaseModel):
@@ -69,6 +129,9 @@ class Settings(BaseModel):
     bootstrap: BootstrapConfig | None = None
     # How often the background loop checks for due eval schedules (seconds).
     eval_scheduler_seconds: int = 30
+    bus: BusConfig = Field(default_factory=BusConfig)
+    ingest: IngestConfig = Field(default_factory=IngestConfig)
+    anchor: AnchorConfig = Field(default_factory=AnchorConfig)
 
     def engine_path(self, *parts: str) -> str:
         """Resolve a path under ``data_dir`` and make sure its parent exists."""

@@ -7,9 +7,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 REMOTE="git@github.com:EdgeF-4/agent-control-plane.git"
 
-# Patterns that must never appear in a published file. This script excludes
-# itself from the scan, since it necessarily names the patterns it looks for.
-BANNED='45\.67\.217|nip\.io|pocketbase|hermes|\bkimi\b|codex|anthropic|\bclaude\b|openai|\bgpt-[0-9]|@gmail\.com'
+# Patterns that must never appear in a published file. They live in an
+# untracked local file (one grep -E pattern per line) so the list itself is
+# never committed; the gate refuses to run without it.
+BANNED_FILE="${BANNED_FILE:-$ROOT/.publish-banned}"
+if [ ! -f "$BANNED_FILE" ]; then
+  echo "Missing $BANNED_FILE (one grep -E pattern per line). Refusing to publish." >&2
+  exit 1
+fi
+BANNED="$(grep -vE '^\s*(#|$)' "$BANNED_FILE" | paste -sd'|' -)"
 hits="$(git grep -nIE "$BANNED" -- . ':!scripts/publish.sh' 2>/dev/null || true)"
 if [ -n "$hits" ]; then
   echo "LEAK SCAN FAILED — refusing to publish:" >&2

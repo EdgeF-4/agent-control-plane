@@ -1,0 +1,28 @@
+{
+  "name": "agent-control-plane-sdk",
+  "version": "0.1.0",
+  "description": "Dependency-free TypeScript client for the Agent Control Plane.",
+  "type": "module",
+  "license": "MIT",
+  "main": "dist/control-plane.js",
+  "types": "dist/control-plane.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/control-plane.d.ts",
+      "import": "./dist/control-plane.js"
+    }
+  },
+  "files": ["dist", "control-plane.ts"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "quickstart": "tsc && node dist/quickstart.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

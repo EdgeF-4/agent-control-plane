@@ -20,9 +20,13 @@ from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
 from .eval_service import run_due_schedules
-from .live import EventBus
+from .evals import load_suites
+from .live import build_bus
 from .migrations import apply_migrations
-from .routers import admin, audit, auth, budgets, evals, live, overview, projects, runs, siem
+from .anchor import Anchorer
+from .routers import (
+    admin, anchors, audit, auth, budgets, evals, live, overview, projects, runs, siem,
+)
 
 _log = logging.getLogger("control_plane")
 
@@ -39,6 +43,19 @@ async def _eval_scheduler(db: Database, hub: EngineHub, tick_seconds: int) -> No
             _log.exception("eval scheduler tick failed")
 
 
+async def _anchor_scheduler(settings: Settings, hub: EngineHub) -> None:
+    """Periodically pin a Merkle root over the recorder's run heads (WORM)."""
+    anchorer = Anchorer(settings, hub.recorder_config)
+    while True:
+        await asyncio.sleep(max(1, settings.anchor.interval_seconds))
+        try:
+            await asyncio.to_thread(anchorer.run_once)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # an anchoring hiccup must never kill the loop
+            _log.exception("anchor tick failed")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
 
@@ -50,7 +67,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Bring the projection store to head. Migrations own the schema now.
         await apply_migrations(dsn)
         hub = EngineHub(settings)
-        bus = EventBus()
+        bus = build_bus(settings)
+        await bus.start()
 
         app.state.settings = settings
         app.state.db = db
@@ -59,18 +77,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         await bootstrap_tenant(settings, db)
         await sync_budgets(db, hub)
+        hub.configure_ingest_oauth(settings.ingest.oauth2)
+        hub.set_eval_suites(load_suites(settings))
         async with db.sessionmaker() as session:
             await refresh_ingest_keys(session, hub)
 
-        scheduler = asyncio.create_task(
+        tasks = [asyncio.create_task(
             _eval_scheduler(db, hub, settings.eval_scheduler_seconds)
-        )
+        )]
+        if settings.anchor.enabled:
+            tasks.append(asyncio.create_task(_anchor_scheduler(settings, hub)))
         try:
             yield
         finally:
-            scheduler.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await scheduler
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            await bus.close()
             hub.close()
             await db.dispose()
 
@@ -104,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(evals.router, prefix=api)
     app.include_router(siem.router, prefix=api)
     app.include_router(admin.router, prefix=api)
+    app.include_router(anchors.router, prefix=api)
     app.include_router(overview.router, prefix=api)
     app.include_router(live.router, prefix=api)
 

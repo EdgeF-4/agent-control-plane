@@ -61,7 +61,7 @@ guarantees something the projection cannot:
 | **recorder** | the run timeline | append-only JSONL sealed with a SHA-256 hash chain — reordering, editing, or deleting any event is detectable |
 | **audit/SIEM** | forwarding | normalization + redaction + reliable delivery (retry + dead-letter) to Splunk/Elastic/Datadog/webhook/file |
 | **gateway** | access + identity | deny-by-precedence policy against an identity; JWT minting/verification for users and constant-time API-key auth for agents |
-| **eval** | reliability history | suite runs, scoring, and regression vs. a pinned baseline |
+| **eval** | reliability history | suite runs (against golden/offline or http adapters), scoring, and regression vs. a pinned baseline |
 
 The **gateway** engine is composed twice: its `PolicyEngine` decides tool
 allow/deny, and its auth machinery backs both human logins (HS256 JWTs via
@@ -123,6 +123,43 @@ production, without changing the model above:
 - **Administration.** Tenants (superadmin), users, projects, budgets, gates, and
   API keys are all managed from the dashboard.
 
+## What phase 3 adds
+
+Phase 3 takes the same slice horizontal, opens it to external identity and real
+model endpoints, and hardens the audit trail toward non-repudiation — again
+without changing the core model.
+
+- **Multi-instance live bus.** The live feed becomes a broker-backed facade
+  (`app/live.py`). With `bus.redis_url` set, every frame is published to Redis and
+  delivered *only* from the subscription — on every instance, including the
+  publisher — so a run recorded on one backend reaches a dashboard connected to
+  another, exactly once and with no per-message de-duplication. With no broker, or
+  if it is unreachable at startup, it degrades to in-process delivery. A shared
+  in-memory wire models two instances deterministically in tests.
+- **OAuth2/JWKS ingest.** Alongside per-project API keys, agents can present an
+  OAuth2 bearer JWT from an external IdP. The hub composes the gateway's
+  `OAuth2Verifier` into the ingest `Authenticator`: RS256 public keys resolve from
+  a JWKS file or endpoint (cached, and refreshed when an unknown `kid` appears, so
+  key rotation needs no restart), or HS256 from a secret in the environment.
+  Signature, expiry, issuer, and audience are all checked. A JWT principal maps to
+  a configured tenant and is scoped to the token's optional project claim.
+- **Real eval adapters.** Suites gain a pluggable adapter layer (`app/evals/`)
+  composed onto the eval engine's scoring: a **golden** adapter that answers from
+  an inline golden-answers map (fully offline — the air-gapped default and a replay
+  tool), and an **http** adapter that POSTs each prompt to a configured model
+  endpoint and scores the response. Suites are named and registered (built-ins plus
+  any under `engines.eval.suites`), and the scheduler, gate, run-now, and routes
+  all resolve them by name.
+- **WORM anchoring.** A background task (and the `anchor` CLI / `/anchors` routes)
+  periodically computes a Merkle root over every run's current head hash and
+  appends it to a hash-chained, append-only anchor log (`app/anchor.py`), optionally
+  mirroring it to an S3-compatible bucket signed with a stdlib AWS SigV4 PUT. Once a
+  root is anchored off-box, editing any anchored run no longer matches it;
+  `anchor-verify` checks the anchor log's own chain and flags drifted runs. This
+  moves the trail from tamper-*evident* toward non-repudiation.
+- **TypeScript SDK.** A second zero-dependency quickstart client (`examples/sdk-ts/`)
+  mirrors the Python one over `fetch`, for agents written in TypeScript.
+
 ## Multi-tenancy
 
 Every row in the projection carries a `tenant_id`. Engine state is partitioned by
@@ -144,6 +181,11 @@ There are two credential paths, both backed by the gateway engine's own crypto:
   `X-API-Key`) and matches the key's SHA-256 digest in constant time, yielding an
   `agent` principal scoped to that project. The ingest routes accept either
   credential; read routes stay operator-only.
+- **Agents via an IdP (optional).** When `ingest.oauth2` is enabled, the same
+  `Authenticator` also verifies an OAuth2 bearer JWT through the gateway's
+  `OAuth2Verifier` — RS256 keys from a rotation-aware JWKS store, or HS256 from an
+  env secret — mapping the token to the configured tenant and, if the token carries
+  a project claim, to that one project.
 
 So the same audited token machinery that guards tool calls guards the dashboard,
 and agents authenticate without ever holding an operator login.
@@ -158,4 +200,6 @@ and agents authenticate without ever holding an operator login.
 - **Secrets stay in `config.json`** (chmod 600), never in environment files or the
   image.
 - **The audit trail is tamper-evident**, so "show me everything that agent did, and
-  prove it wasn't edited" is a query, not a promise.
+  prove it wasn't edited" is a query, not a promise. WORM anchoring pins a Merkle
+  root off-box on a cadence, so a later edit to an anchored run is provable after
+  the fact.

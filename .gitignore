@@ -4,6 +4,9 @@ config.local.json
 config.*.json
 !config.example.json
 
+# Local publish-gate pattern list (see scripts/publish.sh)
+.publish-banned
+
 # Runtime data (engine stores: cost ledger, recorded runs, SIEM sink, DLQ)
 /data/
 backend/data/
@@ -34,6 +37,7 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
+examples/sdk-ts/dist/
 *.local
 
 # Editor / OS
