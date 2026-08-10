@@ -2,65 +2,60 @@
 
 [![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
 
-A self-hosted control plane for teams running automated agents in production.
-One place to see what your agents did, what it cost, what was allowed, and to
-**prove the record wasn't tampered with** — without sending any of it to
-someone else's cloud.
+A self-hosted governance and audit console for teams running automated agents.
+It combines run visibility, enforced budgets, policy decisions, and a
+tamper-evident event record without requiring a hosted control-plane service.
+
+> **Release status:** this repository is an integration source snapshot, not a
+> standalone distribution. Both installation paths require five adjacent
+> engine source checkouts, and two of those dependencies are not publicly
+> retrievable as of 10 August 2026. A stranger cannot install this product from
+> this repository alone. See [Required engine sources](#required-engine-sources).
 
 ![Dashboard](docs/dashboard.png)
 
-## Why I built it
+## Who it is for
 
-I kept running into the same wall on agent projects: the moment an automated
-system is doing real work against real money and real data, you need to answer
-four questions, fast — *what is it doing right now, how much is it spending, is
-it allowed to do that, and can I prove what happened after the fact?*
-
-The tools I reached for were observability dashboards. Most are hosted SaaS, and
-most stop at observability — they show you traces, but they don't enforce a
-budget, they don't make a policy decision, and the audit trail is "trust us."
-For anyone in a regulated, on-prem, or air-gapped environment, "ship your agent
-data to our cloud" is a non-starter before the feature comparison even begins.
-
-So I built the thing I wanted: a single control plane that runs entirely on your
-own infrastructure, combines governance + observability + cost control + a
-tamper-evident audit trail, and makes **zero outbound calls** unless you point
-it at your own log sink.
+This is aimed at platform and compliance teams that must answer four questions:
+what is running, what it costs, whether each action was allowed, and whether the
+event record changed later. Runtime data stays on infrastructure controlled by
+the operator. The default runtime sink is a local file; configured remote log
+sinks are the only intentional runtime egress.
 
 ## What it does
 
-- **Live observability** — every agent run streams into a dark cockpit
+- **Live observability:** every agent run streams into a dark cockpit
   dashboard over a WebSocket: status, tokens, cost, a per-run cost timeline with
   a burn-rate curve, and budget alerts that pop the moment a cap is crossed.
-- **Cost control with teeth** — per-project budgets in integer micro-dollars
+- **Cost control with teeth:** per-project budgets in integer micro-dollars
   (no float drift). Cross a hard cap and the kill switch latches: further work
   is denied until someone with the right role releases it.
-- **Policy decisions** — every tool call is checked against deny-by-precedence
+- **Policy decisions:** every tool call is checked against deny-by-precedence
   rules and recorded as an allow/deny decision with a reason.
-- **A tamper-evident audit trail** — every event in a run is sealed into a
+- **A tamper-evident audit trail:** every event in a run is sealed into a
   SHA-256 hash chain. Reorder, edit, insert, or delete a single event and
-  verification reports exactly where the chain broke. "Show me everything that
-  agent did, and prove it wasn't edited" is a query, not a promise. The chain
-  survives a backend restart mid-run: it's rehydrated from the durable record,
-  so the hashes stay continuous across process boundaries.
-- **Agents authenticate themselves** — each project mints its own API keys, so
+  verification reports exactly where the chain broke. An operator who can
+  replace the whole record can recompute the chain, so this is not
+  non-repudiation. The chain survives a backend restart mid-run: it is
+  rehydrated from the durable record, so the hashes stay continuous.
+- **Agents authenticate themselves:** each project mints its own API keys, so
   the agents and SDKs that report runs never touch an operator login. Only the
   key's hash is stored; the plaintext is shown once.
-- **Audit forwarding you can watch** — see every configured SIEM sink, test its
+- **Audit forwarding you can watch:** see every configured SIEM sink, test its
   reachability, watch delivery stats, and replay anything that dead-lettered,
   right from the dashboard. Copy-paste presets for Splunk, Elasticsearch,
   Datadog, a webhook, or a local file.
-- **Reliability with a gate** — run a regression suite against a pinned
+- **Reliability with a gate:** run a regression suite against a pinned
   baseline, on a schedule, and read the case-by-case diff. Put an *eval gate* on
-  a project and new runs are refused while that suite is regressed. The bundled
-  suite is fully offline, so it works in an air-gapped install.
-- **Admin without leaving the cockpit** — create tenants, users, and projects,
+  a project and new runs are refused while that suite is regressed. The installed
+  engine suite runs offline after its source package is installed.
+- **Admin without leaving the cockpit:** create tenants, users, and projects,
   set budgets and gates, and manage API keys from an admin view.
-- **Real migrations** — the schema is owned by Alembic and brought to head on
+- **Real migrations:** the schema is owned by Alembic and brought to head on
   startup, so it evolves cleanly in production instead of relying on first-run
   table creation.
 
-Reporting a run from your own agent is a few lines — see the dependency-free
+Reporting a run from an agent is a few lines. See the dependency-free
 [quickstart SDK](examples/sdk/).
 
 ## How it's built
@@ -73,7 +68,8 @@ multi-tenant, queryable view on top for the dashboard and API.
      Operators (dashboard, JWT)          Agents & SDKs (per-project API key)
                      │                                   │
                      └───────────────┬───────────────────┘
-                        HTTPS / JSON + WebSocket
+                  loopback HTTP / JSON + WebSocket
+                     TLS at an operator proxy
                        ┌─────────────▼───────────────────┐
                        │       Control Plane API           │  FastAPI, async
                        │  auth · tenancy · api-key ingest · │
@@ -90,7 +86,7 @@ multi-tenant, queryable view on top for the dashboard and API.
         └──────────┘   └────────────┘ └──────────┘ └──────────┘ └──────────┘
                                      │
                        ┌─────────────▼──────────────┐
-                       │   PostgreSQL — unified       │
+                       │   PostgreSQL: unified       │
                        │   projection (tenants, users,│
                        │   projects, runs, events,    │
                        │   decisions, api_keys, evals,│
@@ -98,8 +94,8 @@ multi-tenant, queryable view on top for the dashboard and API.
                        └──────────────────────────────┘
 ```
 
-Each engine guarantees something the projection cannot — integer-exact cost
-accounting, a verifiable hash chain, reliable redacted forwarding — so they stay
+Each engine guarantees something the projection cannot: integer-exact cost
+accounting, a verifiable hash chain, and reliable redacted forwarding. They stay
 the source of truth. PostgreSQL is a fast, joinable view the API writes to inside
 the same request that calls an engine, and integrity-sensitive views re-verify
 against the hash chain on demand. The full design is in
@@ -110,41 +106,67 @@ React + TypeScript + Vite · Docker Compose.
 
 ## Self-host & compliance posture
 
-- **Nothing phones home.** The only outbound network traffic is to the log sink
-  *you* configure. The default sink is a local file.
-- **Air-gap friendly.** Every engine is standard-library or runs against a local
-  store; the unified store is a Postgres container you own; the reliability
-  suite runs offline.
-- **Secrets stay in `config.json`** (chmod 600), never in environment files or
-  the image.
+- **No product telemetry is configured.** The default runtime sink is a local
+  file. A remote log sink creates intentional egress to its configured endpoint.
+- **Isolatable runtime.** After images and dependencies are assembled, the
+  default runtime can operate with local stores. The source build itself is not
+  standalone or air-gap complete because it needs the five engine sources.
+- **One secret source.** `config.json` is ignored and mounted read-only. The
+  setup passes database fields to the database container environment at runtime;
+  it does not write an environment file or bake those values into an image.
 - **Multi-tenant from the first row.** Every record carries a tenant id, and a
   request can only ever touch its own tenant's data and engine scopes.
-- **Tamper-evident by construction**, so the audit trail holds up to scrutiny
-  rather than asking for trust.
+- **Tamper-evident by construction.** Verification detects partial record
+  changes. The linked threat model states why this is not non-repudiation.
 
-The full write-up — data residency, egress, the tamper-evidence threat model and
-its limits, retention, and RBAC — is in
+The full write-up covers data residency, egress, the tamper-evidence threat
+model and its limits, retention, and RBAC. It is in
 [docs/self-hosting-compliance.md](docs/self-hosting-compliance.md).
 
-## Quick start (Docker)
+## Required engine sources
+
+The control plane composes these source packages. They are not declared as
+public-index dependencies and are not vendored in this repository:
+
+```text
+cost-governor
+mcp-gateway
+mcp-siem-bridge
+agent-flight-recorder
+agent-eval
+```
+
+Place all five directories under one parent and set `ENGINES_SRC` to that
+parent. The setup scripts now stop with an exact missing-directory list. Until
+all five sources have an owner-approved public or packaged route, the quick
+starts below are reproducible only for authorized source holders.
+
+## Quick start (Docker, source holders)
 
 ```bash
+export ENGINES_SRC=/absolute/path/to/engine-checkouts
 cp config.example.json config.json     # then edit secrets
 chmod 600 config.json
-make up                                  # builds and starts postgres + api + dashboard
+make up                                  # builds and starts the stack in the background
+make smoke                               # 2 checks: API health + dashboard
 ```
 
 - Dashboard: <http://localhost:8801>
 - API + docs: <http://localhost:8800/docs>
 
 Sign in with the `bootstrap` admin from your `config.json`. `make up` reads the
-Postgres credentials from `config.json` so they match what the API uses — no
-secrets in any committed file.
+Postgres credentials from `config.json` so they match what the API uses. No
+secrets are committed. API and dashboard ports bind to loopback only. If a port
+is already occupied, set `ACP_API_PORT` and `ACP_WEB_PORT` before `make up` and
+use the same values for `make smoke`.
 
-## Quick start (local, no Docker)
+## Quick start (local, source holders)
 
 ```bash
+export ENGINES_SRC=/absolute/path/to/engine-checkouts
 make dev                                 # venv with the engines + backend (editable)
+cp config.local.example.json config.local.json
+chmod 600 config.local.json              # then replace the two sample secrets
 . .venv/bin/activate
 export ACP_CONFIG=$PWD/config.local.json # a SQLite-backed config for local runs
 python -m app.cli seed                   # optional: a demonstrable dataset
@@ -178,6 +200,8 @@ log sink. `GET /api/v1/runs/{id}/verify` confirms the chain is intact.
 ## Testing
 
 ```bash
+export ENGINES_SRC=/absolute/path/to/engine-checkouts
+make dev             # required once for the backend and five engine packages
 make test            # backend: auth, multi-tenancy, the e2e slice, tamper-evidence
 make build           # type-check and build the dashboard
 ```
@@ -192,7 +216,7 @@ runs and gates evals, and exercises the tenant/user/project admin routes.
 ## Project layout
 
 ```
-backend/    FastAPI app — config, data model, auth, engine adapters, routers, tests
+backend/    FastAPI app: config, data model, auth, engine adapters, routers, tests
 backend/alembic/  migration history (schema is brought to head on startup)
 frontend/   React + TypeScript cockpit dashboard
 deploy/     Dockerfiles + nginx config

@@ -3,6 +3,8 @@ config.json
 config.local.json
 config.*.json
 !config.example.json
+!config.local.example.json
+.public-release-deny-patterns
 
 # Runtime data (engine stores: cost ledger, recorded runs, SIEM sink, DLQ)
 /data/

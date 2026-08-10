@@ -2,8 +2,8 @@
 
 The control plane is one product with a single job: give a team running automated
 agents in production a place to **see what their agents did, what it cost, what was
-allowed, and prove none of it was tampered with** — without sending any of that data
-to someone else's cloud.
+allowed, and detect partial changes to the event record**. It does not require a
+hosted control-plane service and sends data only to operator-configured sinks.
 
 It does not reinvent the hard parts. It composes five focused engines, each of which
 owns its own authoritative store, and projects a unified, multi-tenant, queryable view
@@ -16,7 +16,8 @@ on top for the dashboard and the API.
                           │                Browser                    │
                           │      dark cockpit dashboard (SPA)         │
                           └───────────────────┬───────────────────────┘
-                                              │ HTTPS / JSON + WebSocket
+                                      │ loopback HTTP / JSON + WebSocket
+                                      │ TLS at an operator proxy
                           ┌───────────────────▼───────────────────────┐
                           │            Control Plane API                │
                           │              (FastAPI, async)               │
@@ -42,7 +43,7 @@ on top for the dashboard and the API.
             └───────── eval engine (reliability/regression + gate, SQLite) ───────┘
 
                           ┌──────────────────────────────────────────┐
-                          │     PostgreSQL — unified projection        │
+                          │     PostgreSQL: unified projection        │
                           │  tenants · users · projects · runs ·        │
                           │  run_events · policy_decisions ·            │
                           │  api_keys · eval_runs · eval_schedules      │
@@ -58,7 +59,7 @@ guarantees something the projection cannot:
 | Engine | Owns | Guarantee it provides |
 | --- | --- | --- |
 | **cost** | the spend ledger | integer micro-dollar accounting, no float drift; budgets that latch a kill switch and emit threshold/cap/kill alerts |
-| **recorder** | the run timeline | append-only JSONL sealed with a SHA-256 hash chain — reordering, editing, or deleting any event is detectable |
+| **recorder** | the run timeline | append-only JSONL sealed with a SHA-256 hash chain; reordering, editing, or deleting any event is detectable |
 | **audit/SIEM** | forwarding | normalization + redaction + reliable delivery (retry + dead-letter) to Splunk/Elastic/Datadog/webhook/file |
 | **gateway** | access + identity | deny-by-precedence policy against an identity; JWT minting/verification for users and constant-time API-key auth for agents |
 | **eval** | reliability history | suite runs, scoring, and regression vs. a pinned baseline |
@@ -71,7 +72,7 @@ allow/deny, and its auth machinery backs both human logins (HS256 JWTs via
 PostgreSQL is **not** another source of truth. It is a fast, joinable projection that
 the API writes to inside the same request that calls an engine. The dashboard reads
 the projection; integrity-sensitive views (the audit trail) can re-verify against the
-recorder's hash chain on demand, so the projection can never quietly lie.
+recorder's hash chain on demand. The projection alone is not integrity proof.
 
 ## The end-to-end path (phase 1)
 
@@ -83,7 +84,7 @@ A single ingested run exercises every engine:
 2. **Report usage.** `POST /api/v1/runs/{id}/usage` records spend through the cost
    engine (`Governor.record_llm`) and then asks it for a decision
    (`Governor.check`). If a budget hard-caps, the engine returns `deny` and — for a
-   latching budget — engages its kill switch.
+   latching budget, engages its kill switch.
 3. **Enforce.** A denied decision flips the run to `killed`, and the control plane
    records the enforcement as a `policy_decision` and a sealed recorder event.
 4. **Audit.** Every step is sealed into the recorder's hash chain *and* forwarded to
@@ -150,12 +151,13 @@ and agents authenticate without ever holding an operator login.
 
 ## Self-host & compliance posture
 
-- **No outbound calls.** Nothing phones home. The only network egress is to the SIEM
-  sinks *you* configure. The default sink is a local file.
-- **Air-gap friendly.** Every engine is standard-library or runs against a local
-  store; the unified store is a Postgres container you own. The bundled eval adapter
-  is offline.
-- **Secrets stay in `config.json`** (chmod 600), never in environment files or the
-  image.
-- **The audit trail is tamper-evident**, so "show me everything that agent did, and
-  prove it wasn't edited" is a query, not a promise.
+- **No product telemetry is configured.** The default sink is a local file. A
+  configured remote sink creates intentional egress to that endpoint.
+- **Isolatable runtime.** After images and dependencies are assembled, the
+  installed engines and offline eval suite can use local stores. The source
+  build still requires five adjacent engine source trees.
+- **One secret source.** `config.json` is ignored and mounted read-only. The
+  setup passes database fields to the database container environment at runtime;
+  it does not create an environment file or bake them into the image.
+- **The audit trail is tamper-evident.** Verification detects partial record
+  changes. An operator who can replace the full record can recompute the chain.

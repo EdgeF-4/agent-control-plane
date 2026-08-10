@@ -4,7 +4,7 @@
 # backend/engines_vendor/ by scripts/vendor-engines.sh before the build and
 # installed here. This keeps the control plane composing the real engines while
 # the image stays self-contained and air-gappable.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

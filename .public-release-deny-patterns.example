@@ -1,0 +1,7 @@
+# Copy this file to .public-release-deny-patterns.
+# Keep the real file untracked. Add one case-insensitive Python regex per line.
+# Include the owner's private identifiers, every client identifier, internal
+# hostnames and paths, and every tool or vendor name excluded from public work.
+owner-private-identifier
+client-private-identifier
+internal-host-pattern

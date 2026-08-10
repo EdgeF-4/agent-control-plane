@@ -18,4 +18,4 @@ POSTGRES_USER="$(read_cfg user)"; export POSTGRES_USER
 POSTGRES_PASSWORD="$(read_cfg password)"; export POSTGRES_PASSWORD
 POSTGRES_DB="$(read_cfg name)"; export POSTGRES_DB
 
-exec docker compose up --build "$@"
+exec docker compose up --build --detach "$@"

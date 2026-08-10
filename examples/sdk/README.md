@@ -2,7 +2,7 @@
 
 A single-file, dependency-free Python client for reporting agent runs to the
 control plane. Copy [`control_plane_client.py`](control_plane_client.py) into
-your project — it uses only the standard library.
+your project. It uses only the standard library.
 
 ## Authenticate
 
@@ -15,7 +15,7 @@ The plaintext key is shown once; only its hash is stored.
 ```python
 from control_plane_client import ControlPlane
 
-cp = ControlPlane("https://control-plane.internal", api_key="acp_...")
+cp = ControlPlane("https://control-plane.example", api_key="acp_...")
 
 with cp.open_run(agent_name="nightly-report", label="weekly digest") as run:
     outcome = run.report_usage(

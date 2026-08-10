@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
-# Publish gate. Scans tracked files for anything that should never leave the
-# repository, then (only with --confirm) wires the remote and pushes.
+# Fail-closed public release gate. It checks the worktree and all reachable Git
+# history before allowing an explicitly confirmed non-default branch push.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-REMOTE="git@github.com:EdgeF-4/agent-control-plane.git"
 
-# Patterns that must never appear in a published file. This script excludes
-# itself from the scan, since it necessarily names the patterns it looks for.
-BANNED='45\.67\.217|nip\.io|pocketbase|hermes|\bkimi\b|codex|anthropic|\bclaude\b|openai|\bgpt-[0-9]|@gmail\.com'
-hits="$(git grep -nIE "$BANNED" -- . ':!scripts/publish.sh' 2>/dev/null || true)"
-if [ -n "$hits" ]; then
-  echo "LEAK SCAN FAILED — refusing to publish:" >&2
-  echo "$hits" >&2
-  exit 1
-fi
-echo "Leak scan clean."
+DENY_FILE="${PUBLIC_RELEASE_DENY_FILE:-$ROOT/.public-release-deny-patterns}"
+python3 scripts/public_release_check.py --deny-file "$DENY_FILE"
 
-if [ "${1:-}" != "--confirm" ]; then
-  echo "Dry run. Re-run with --confirm to set origin ($REMOTE) and push."
+if [ "${1:---check}" = "--check" ]; then
+  echo "Release check passed. No network action taken."
   exit 0
 fi
+if [ "$1" != "--confirm" ]; then
+  echo "Usage: scripts/publish.sh [--check|--confirm]" >&2
+  exit 2
+fi
 
-git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
-git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+branch="$(git symbolic-ref --quiet --short HEAD)"
+default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD)"
+default="${default#origin/}"
+if [ -z "$branch" ] || [ -z "$default" ]; then
+  echo "Cannot determine current and default branches. Refusing to push." >&2
+  exit 2
+fi
+if [ "$branch" = "$default" ]; then
+  echo "Refusing to push the default branch." >&2
+  exit 2
+fi
+
+git remote get-url origin >/dev/null
+git push --set-upstream origin "$branch"

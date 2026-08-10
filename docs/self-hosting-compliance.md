@@ -1,10 +1,9 @@
-# Self-hosting & compliance guarantees
+# Self-hosting and compliance posture
 
-This is the write-up I'd want if I were putting this in front of a security team.
-It states plainly what the control plane guarantees, how, and — just as
-important — where each guarantee stops.
+This document states what the control plane implements, how it was verified, and
+where each claim stops. It is a technical posture summary, not a certification.
 
-## Data residency: everything stays on your box
+## Data residency: where runtime state lives
 
 The control plane and all five engines run on infrastructure you own. Every store
 is local:
@@ -17,19 +16,22 @@ is local:
 | SIEM sink | the forwarded audit stream | a local file by default |
 | eval history | suite runs and baselines | local SQLite |
 
-No managed service sees your agent data. There is no telemetry, no license
-call-home, no usage beacon.
+No managed service is required. With the default local sink, agent data stays in
+operator-controlled stores. A configured remote sink receives the redacted audit
+events sent to it. No product telemetry, license call-home, or usage beacon is
+configured in this repository.
 
 ## Egress: one destination, and you choose it
 
-The only outbound network traffic the control plane makes is to the **SIEM sink
-you configure**. Out of the box that sink is a local file, so a default install
-makes **zero** outbound calls. Point it at Splunk, Elasticsearch, Datadog, or a
-webhook and it will talk to exactly that endpoint and nothing else — with retry
-and a dead-letter queue so a sink outage never drops an audit event or blocks a
-run. This makes an air-gapped deployment a first-class configuration, not a
-workaround: the reliability suite is offline, the engines are standard-library or
-local-store, and nothing needs a public index at runtime.
+The default runtime sink is a local file. A configured remote sink creates
+intentional egress to its endpoint, with retry and a dead-letter queue so a sink
+outage does not drop an audit event or block a run.
+
+The application tests verified the default local-sink behavior, but this audit
+did not packet-capture every transitive dependency. Building the images requires
+package sources, and this repository also requires five adjacent engine source
+trees. After images and dependencies are assembled, the default runtime can be
+network-isolated with local stores and the offline reliability suite.
 
 ## Tamper-evidence: what the hash chain proves, and what it doesn't
 
@@ -47,19 +49,19 @@ so events recorded before and after a restart verify as one chain.
 
 **The limit, stated honestly:** this is tamper-*evident*, not tamper-*proof*.
 Anyone who can rewrite the log file can also recompute a fresh, internally
-consistent chain. What the chain buys you is that *casual or partial* tampering —
-editing one record, dropping an inconvenient event, reordering steps — is
+consistent chain. What the chain buys you is that *casual or partial* tampering,
+such as editing one record, dropping an inconvenient event, or reordering steps, is
 detectable. For non-repudiation, periodically anchor the final hash of a run
 somewhere the same operator can't silently rewrite (a WORM bucket, a notary, a
 second host). The chain makes that anchor cheap: you only need to pin one hash.
 
 ## Secrets
 
-Runtime secrets — the database password, the JWT signing key, sink credentials —
-live only in `config.json`, which is `chmod 600` and git-ignored. They are never
-written to environment files, baked into an image, or committed. Sinks are
-configured as code in that same file, so egress destinations and their
-credentials are reviewable and are never mutated at runtime by the dashboard.
+`config.json` is the operator-managed source for the database password, JWT
+signing key, and sink credentials. It is `chmod 600`, git-ignored, and mounted
+read-only. The startup script passes database fields to the database container
+environment at runtime. It does not create an environment file, bake those
+values into an image, or commit them.
 
 Agent credentials never sit in the clear: a per-project API key is shown once at
 creation and only its SHA-256 digest is stored. Revoking a key removes it from
@@ -72,7 +74,7 @@ the authenticator immediately.
 - **Tenant isolation is enforced on every row.** Each record carries a
   `tenant_id`, and every route resolves the caller's token to a tenant and scopes
   its queries to it. Engine state is partitioned the same way — the cost engine's
-  scope id is namespaced `tenant/project`, so two tenants' identically-named
+  scope id is namespaced `tenant/project`, so two tenants' identically named
   projects never share a ledger.
 - **Agent keys are project-scoped.** A key can only open and report runs for the
   one project it belongs to; pointing it elsewhere is refused.
@@ -80,7 +82,7 @@ the authenticator immediately.
 ## Cost governance
 
 Budgets are integer micro-dollars (no floating-point drift). A hard cap denies
-further spend the moment it's crossed and — for a latching budget — engages a
+further spend the moment it is crossed and, for a latching budget, engages a
 kill switch that stays engaged until an operator with the right role releases it.
 Threshold, cap, and kill events are both recorded and pushed to the live feed, so
 a runaway agent is visible and stopped, not just logged after the fact.
@@ -88,7 +90,7 @@ a runaway agent is visible and stopped, not just logged after the fact.
 ## Reliability gating
 
 A project can pin an *eval gate* to a suite. While that suite's latest run is
-regressed against its baseline, new runs are refused — so a known-bad change
+regressed against its baseline, new runs are refused. A known-bad change
 can't be promoted into production traffic on that project until reliability is
 restored.
 
@@ -102,6 +104,6 @@ test asserts the migrations match the models with zero drift.
 
 - It is **not** a WAF or a network firewall; it governs the agents that report to
   it, not arbitrary traffic.
-- The hash chain is evidence, not cryptographic non-repudiation on its own (see
-  above) — anchor the final hash off-box when you need that.
-- It does **not** phone home or auto-update; you own the upgrade cadence.
+- The hash chain is evidence, not cryptographic non-repudiation on its own. See
+  above and anchor the final hash off-box when you need that.
+- It does not auto-update. The operator owns the upgrade cadence.

@@ -35,7 +35,7 @@ _PRESETS = [
         "label": "Splunk (HTTP Event Collector)",
         "description": "Forward to a Splunk HEC endpoint. Set the token inline or via SPLUNK_HEC_TOKEN.",
         "config": {"type": "splunk_hec", "name": "splunk", "enabled": True,
-                   "url": "https://splunk.internal:8088", "token_env": "SPLUNK_HEC_TOKEN",
+                   "url": "https://splunk.example:8088", "token_env": "SPLUNK_HEC_TOKEN",
                    "index": "mcp_audit", "sourcetype": "mcp:audit"},
     },
     {
@@ -43,7 +43,7 @@ _PRESETS = [
         "label": "Elasticsearch (_bulk)",
         "description": "Bulk-index into Elasticsearch. Authenticate with an API key via ELASTIC_API_KEY.",
         "config": {"type": "elasticsearch", "name": "elastic", "enabled": True,
-                   "url": "https://elastic.internal:9200", "index": "mcp-audit",
+                   "url": "https://elastic.example:9200", "index": "mcp-audit",
                    "api_key_env": "ELASTIC_API_KEY"},
     },
     {
@@ -59,7 +59,7 @@ _PRESETS = [
         "label": "Generic webhook",
         "description": "POST batches as JSON to any HTTPS endpoint (a chat webhook, a custom collector).",
         "config": {"type": "webhook", "name": "webhook", "enabled": True,
-                   "url": "https://collector.internal/audit", "body_format": "array"},
+                   "url": "https://collector.example/audit", "body_format": "array"},
     },
 ]
 

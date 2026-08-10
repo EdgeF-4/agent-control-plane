@@ -5,7 +5,7 @@ name: agent-control-plane
 #
 # Secrets are never stored in this file or a .env. The backend reads them from
 # config.json (mounted read-only). scripts/up.sh feeds Postgres the matching
-# credentials from that same config.json — run `make up` rather than
+# credentials from that same config.json. Run `make up` rather than
 # `docker compose up` so the values line up.
 
 services:
@@ -34,7 +34,7 @@ services:
       - ./config.json:/config/config.json:ro
       - acp-data:/data
     ports:
-      - "8800:8800"
+      - "127.0.0.1:${ACP_API_PORT:-8800}:8800"
 
   frontend:
     build:
@@ -43,7 +43,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8801:80"
+      - "127.0.0.1:${ACP_WEB_PORT:-8801}:80"
 
 volumes:
   pgdata:

@@ -1,13 +1,13 @@
 """A tiny, dependency-free client for the Agent Control Plane.
 
-Standard library only — copy this one file into your agent and you can open a
+Standard library only. Copy this one file into your agent and you can open a
 run, report what it spent, record the tool calls it made, and close it out. It
 authenticates with a per-project ingest key (create one in the dashboard under
 Admin -> Projects -> Keys), so an agent never needs an operator's login.
 
     from control_plane_client import ControlPlane
 
-    cp = ControlPlane("https://control-plane.internal", api_key="acp_...")
+    cp = ControlPlane("https://control-plane.example", api_key="acp_...")
     with cp.open_run(agent_name="nightly-report", label="weekly digest") as run:
         run.report_usage(model="assistant-large", input_tokens=1200, output_tokens=350, cost_usd=0.12)
         run.record_tool_call(tool="search", server="web", arguments={"q": "market size"})
