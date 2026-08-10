@@ -6,11 +6,15 @@ A self-hosted governance and audit console for teams running automated agents.
 It combines run visibility, enforced budgets, policy decisions, and a
 tamper-evident event record without requiring a hosted control-plane service.
 
-> **Release status:** this repository is an integration source snapshot, not a
-> standalone distribution. Both installation paths require five adjacent
-> engine source checkouts, and two of those dependencies are not publicly
-> retrievable as of 10 August 2026. A stranger cannot install this product from
-> this repository alone. See [Required engine sources](#required-engine-sources).
+> **Visibility recommendation:** keep this repository private. It is an
+> integration source snapshot, not a standalone distribution. Both installation
+> paths require five adjacent engine source checkouts, and two dependencies are
+> not publicly retrievable as of 10 August 2026. Reachable Git history also
+> contains personal author metadata, machine-attribution text, and private
+> release identifiers. A stranger cannot install this product from this
+> repository alone, and a normal commit cannot repair reachable history. See
+> [Required engine sources](#required-engine-sources) and
+> [Limits and who should not use it](#limits-and-who-should-not-use-it).
 
 ![Dashboard](docs/dashboard.png)
 
@@ -21,6 +25,26 @@ what is running, what it costs, whether each action was allowed, and whether the
 event record changed later. Runtime data stays on infrastructure controlled by
 the operator. The default runtime sink is a local file; configured remote log
 sinks are the only intentional runtime egress.
+
+## Limits and who should not use it
+
+- **Not a public standalone package.** Five sibling engine source trees are
+  required, and two have no verified public retrieval route. Do not adopt this
+  repository unless you already hold all five exact source trees.
+- **Not a workflow orchestrator.** It records and governs work reported through
+  its API. It does not schedule arbitrary jobs, run containers, or recover an
+  interrupted business workflow.
+- **Not a security boundary.** Policy enforcement covers callers that use this
+  control plane. It does not inspect or block traffic that bypasses it.
+- **Not high-availability by default.** The supplied Compose stack is a
+  single-host reference deployment. Multi-host failover, backup automation, and
+  operator TLS termination are left to the deployer.
+- **Not non-repudiation or certification.** The hash chain detects partial
+  changes, but a privileged operator can replace and recompute a whole record.
+  The compliance document describes how to add an external anchor.
+
+Teams that need a five-minute public install, managed hosting, arbitrary job
+orchestration, or a certified compliance product should not use this snapshot.
 
 ## What it does
 
@@ -100,6 +124,17 @@ the source of truth. PostgreSQL is a fast, joinable view the API writes to insid
 the same request that calls an engine, and integrity-sensitive views re-verify
 against the hash chain on demand. The full design is in
 [docs/architecture.md](docs/architecture.md).
+
+### Design decision and trade
+
+The control plane keeps each engine as the source of truth and uses PostgreSQL
+as a query projection instead of folding all five domains into one database.
+That preserves the engines' domain guarantees and keeps integrity checks tied
+to their authoritative records. The cost is operational coupling: deployment,
+testing, upgrades, and incident recovery must coordinate six source packages
+and several stores. That trade is acceptable for an owner-controlled integrated
+product, but it is the reason this repository is not an honest standalone
+public distribution today.
 
 **Stack:** Python 3.12 · FastAPI (async) · SQLAlchemy 2.0 · PostgreSQL ·
 React + TypeScript + Vite · Docker Compose.
@@ -212,6 +247,83 @@ catches it, keeps the hash chain intact across a simulated restart, authenticate
 an agent with a project API key, checks migrations build the schema with no
 drift, drives the SIEM DLQ and replay, streams budget alerts over the WebSocket,
 runs and gates evals, and exercises the tenant/user/project admin routes.
+
+### Commands behind the capability claims
+
+Run `make dev` once with all five engine sources, then run these commands from
+the repository root. Each command names the tests that demonstrate the matching
+README claim. These commands cannot be independently verified from the public
+snapshot until every engine source has a public or packaged route.
+
+```bash
+# Live run frames, cost timeline, and budget alerts
+.venv/bin/python -m pytest -q backend/tests/test_cost_feed.py \
+  backend/tests/test_e2e_slice.py::test_live_websocket_receives_run_frames
+
+# Budget latch and policy allow/deny decisions
+.venv/bin/python -m pytest -q \
+  backend/tests/test_e2e_slice.py::test_budget_cap_kills_the_run \
+  backend/tests/test_units.py::test_policy_allows_and_denies
+
+# Tamper detection and chain continuation after restart
+.venv/bin/python -m pytest -q \
+  backend/tests/test_e2e_slice.py::test_audit_trail_is_tamper_evident \
+  backend/tests/test_e2e_slice.py::test_run_survives_backend_restart_midflight
+
+# Project-scoped and revoked API keys
+.venv/bin/python -m pytest -q backend/tests/test_api_keys.py
+
+# Sink health, dead letters, and replay
+.venv/bin/python -m pytest -q backend/tests/test_siem.py
+
+# Eval scheduling, regression comparison, and the run gate
+.venv/bin/python -m pytest -q backend/tests/test_evals_phase2.py
+
+# Tenant, user, project, and role boundaries
+.venv/bin/python -m pytest -q backend/tests/test_admin.py
+
+# Migration completeness, repeatability, and model drift
+.venv/bin/python -m pytest -q backend/tests/test_migrations.py
+```
+
+## Troubleshooting
+
+### `Missing required engine source directories`
+
+The value of `ENGINES_SRC` does not contain all five directories listed under
+[Required engine sources](#required-engine-sources), or one lacks
+`pyproject.toml`. Point `ENGINES_SRC` at their common parent and run `make dev`
+again. Public users cannot fix a source that has no retrieval route. Do not
+create placeholder packages.
+
+### `No config.json`
+
+The Docker path was started before local configuration existed. Run
+`cp config.example.json config.json`, replace every sample secret, run
+`chmod 600 config.json`, and then run `make up` again.
+
+### `Missing .venv`
+
+The test target was called before development setup. Confirm all five engine
+directories are present, set `ENGINES_SRC`, run `make dev`, then run
+`make test` again.
+
+### A local port is already in use
+
+Choose unused loopback ports and use the same values for startup and smoke:
+
+```bash
+export ACP_API_PORT=18800 ACP_WEB_PORT=18801
+make up
+make smoke
+```
+
+### `make smoke` cannot reach a service
+
+Inspect startup state with `docker compose ps` and backend diagnostics with
+`docker compose logs backend`. Fix the first reported startup error, run
+`make up` again, and rerun `make smoke`. Do not treat a passing dashboard check
+as proof that authenticated API capabilities work.
 
 ## Project layout
 
