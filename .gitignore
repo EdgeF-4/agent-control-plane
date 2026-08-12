@@ -38,6 +38,7 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 examples/sdk-ts/dist/
+*.tsbuildinfo
 *.local
 
 # Editor / OS

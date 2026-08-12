@@ -1,274 +1,147 @@
 # Agent Control Plane
 
-[![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
+A self-hosted control plane for governing automated workloads across projects,
+teams, and model providers.
 
-A **vendor-neutral**, self-hosted control plane for teams running automated
-agents in production — governance, cost control, and a tamper-evident audit
-trail for *any* LLM or agent stack, on infrastructure you own.
-
-A wave of self-hosted agent gateways has arrived, but most are built around a
-single vendor's coding CLI: sign-on, per-seat cost, and spend caps for that one
-tool. This is the control plane for everything *else* you actually run — many
-agents, more than one model vendor, and teams or clients that have to stay
-isolated from each other. What sets it apart:
-
-- **Vendor-neutral by design** — report a run from any model or agent framework
-  in a few lines (Python/TypeScript SDK, or an OAuth2 JWT from your own IdP).
-  Nothing here is tied to one vendor's CLI.
-- **Multi-tenant projects, not per-seat** — tenants → projects → RBAC, so a
-  single install cleanly isolates many teams or clients; every row carries a
-  tenant id.
-- **An audit trail you can prove** — every event is sealed in a SHA-256 hash
-  chain and Merkle-anchored off-box, so it re-verifies independently. "Show me
-  what that agent did, and prove it wasn't edited" is a query, not a promise.
-- **Reliability gates, not just spend caps** — pin an eval baseline and new runs
-  are refused while a project's suite is regressed.
-
-![Dashboard](docs/dashboard.png)
-
-## Why I built it
-
-I kept running into the same wall on agent projects: the moment an automated
-system is doing real work against real money and real data, you need to answer
-four questions, fast — *what is it doing right now, how much is it spending, is
-it allowed to do that, and can I prove what happened after the fact?*
-
-The tools I reached for were observability dashboards. Most are hosted SaaS, and
-most stop at observability — they show you traces, but they don't enforce a
-budget, they don't make a policy decision, and the audit trail is "trust us."
-For anyone in a regulated, on-prem, or air-gapped environment, "ship your agent
-data to our cloud" is a non-starter before the feature comparison even begins.
-
-So I built the thing I wanted: a single control plane that runs entirely on your
-own infrastructure, combines governance + observability + cost control + a
-tamper-evident audit trail, and makes **zero outbound calls** unless you point
-it at your own log sink.
+I built this because observability alone was not enough. Once automation can
+spend money, call tools, or touch production data, I want one place that can
+answer four questions: what is running, what did it cost, was it allowed, and
+can I verify the record afterward?
 
 ## What it does
 
-- **Live observability** — every agent run streams into a dark cockpit
-  dashboard over a WebSocket: status, tokens, cost, a per-run cost timeline with
-  a burn-rate curve, and budget alerts that pop the moment a cap is crossed.
-- **Cost control with teeth** — per-project budgets in integer micro-dollars
-  (no float drift). Cross a hard cap and the kill switch latches: further work
-  is denied until someone with the right role releases it.
-- **Policy decisions** — every tool call is checked against deny-by-precedence
-  rules and recorded as an allow/deny decision with a reason.
-- **A tamper-evident audit trail** — every event in a run is sealed into a
-  SHA-256 hash chain. Reorder, edit, insert, or delete a single event and
-  verification reports exactly where the chain broke. "Show me everything that
-  agent did, and prove it wasn't edited" is a query, not a promise. The chain
-  survives a backend restart mid-run: it's rehydrated from the durable record,
-  so the hashes stay continuous across process boundaries.
-- **Prove it later, off-box** — on a cadence, a Merkle root over every run's head
-  hash is pinned to an append-only, itself-hash-chained anchor file (and,
-  optionally, a write-once S3-compatible bucket). Once a root is anchored, editing
-  any anchored run no longer matches it — tamper-*evidence* becomes closer to
-  non-repudiation. `control-plane anchor-verify` checks the anchor log and flags
-  any run that has drifted since.
-- **Agents authenticate themselves** — each project mints its own API keys, so
-  the agents and SDKs that report runs never touch an operator login. Only the
-  key's hash is stored; the plaintext is shown once. Already run an identity
-  provider? Point ingest at its **JWKS** and agents authenticate with an OAuth2
-  bearer JWT instead (RS256 with rotation-aware key caching, or HS256).
-- **Audit forwarding you can watch** — see every configured SIEM sink, test its
-  reachability, watch delivery stats, and replay anything that dead-lettered,
-  right from the dashboard. Copy-paste presets for Splunk, Elasticsearch,
-  Datadog, a webhook, or a local file.
-- **Reliability with a gate** — run a regression suite against a pinned
-  baseline, on a schedule, and read the case-by-case diff. Put an *eval gate* on
-  a project and new runs are refused while that suite is regressed. Suites run
-  against pluggable adapters: a fully-offline **golden-answers** adapter (so it
-  works in an air-gapped install) or an **http** adapter that scores a real model
-  endpoint you point it at. Add your own suites in `config.json`.
-- **Scale horizontally** — run more than one backend instance behind a load
-  balancer and point them at a shared Redis: the live dashboard feed and budget
-  alerts fan out across every instance, delivered exactly once. No Redis? It
-  degrades gracefully to single-instance, in-process delivery.
-- **Admin without leaving the cockpit** — create tenants, users, and projects,
-  set budgets and gates, and manage API keys from an admin view.
-- **Real migrations** — the schema is owned by Alembic and brought to head on
-  startup, so it evolves cleanly in production instead of relying on first-run
-  table creation.
+- Ingests runs through small Python and TypeScript clients or OAuth2 JWTs.
+- Enforces project budgets with integer micro-dollar accounting and a latching
+  kill switch.
+- Records tool policy decisions and a SHA-256 hash chain for each run.
+- Anchors run heads into an append-only Merkle log, with optional S3-compatible
+  storage.
+- Runs regression suites and can block new work when a pinned baseline regresses.
+- Streams live status and budget alerts to a React dashboard.
+- Keeps tenants, projects, users, API keys, and data isolated through RBAC.
+- Forwards redacted audit events to local files or configured SIEM endpoints.
 
-Reporting a run from your own agent is a few lines — see the dependency-free
-quickstart SDKs for [Python](examples/sdk/) and [TypeScript](examples/sdk-ts/).
+## Quick start
 
-## How this compares
-
-Full honesty: if your team lives entirely inside one vendor's coding CLI, that
-vendor's own self-hosted gateway is the simpler choice. You get sign-on, per-seat
-cost attribution, and spend caps wired natively to the tool, with first-party
-support. I'd reach for it in that case and not build a thing.
-
-This control plane is for the messier reality most teams have: several agent
-stacks, more than one model vendor, home-grown automations, and clients or teams
-that must stay walled off from one another.
-
-|                  | Single-vendor gateway     | This control plane                                        |
-|------------------|---------------------------|-----------------------------------------------------------|
-| Scope            | One vendor's coding CLI   | Any LLM or agent stack (SDK or JWT ingest)                |
-| Isolation        | Per-user seats            | Multi-tenant: tenants → projects → RBAC                   |
-| Cost control     | Spend caps                | Integer-exact caps + a latching kill switch               |
-| Audit trail      | Access + usage logs       | SHA-256 hash chain + off-box Merkle anchor, re-verifiable |
-| Reliability      | —                         | Eval regression gate refuses regressed runs               |
-| Policy           | —                         | Per-tool allow/deny decisions, each with a reason         |
-| Operator sign-on | Turnkey SSO               | JWT login + RBAC (no turnkey enterprise SSO yet)          |
-| Footprint        | One container + Postgres  | Compose: Postgres + API + dashboard, optional Redis       |
-
-*(Compared against a single-vendor gateway's stated scope — governance for one
-CLI; that feature set may evolve, and turnkey SSO plus a smaller footprint are
-genuine advantages there.)*
-
-**Pick the single-vendor gateway** when that one CLI is your whole agent surface
-and turnkey SSO plus seat-level billing is what you need. **Pick this** when you
-run more than one thing, need tenant isolation, or have to *prove* — to an
-auditor, a client, or yourself — exactly what an agent did and that the record
-was never edited.
-
-## How it's built
-
-The control plane doesn't reinvent the hard parts. It composes five focused
-engines, each of which owns its own authoritative store, and projects a single,
-multi-tenant, queryable view on top for the dashboard and API.
-
-```
-   Operators (dashboard, JWT)     Agents & SDKs (Py / TS)
-             │             per-project API key ── or ── OAuth2 JWT (your IdP/JWKS)
-             └───────────────┬───────────────────┘
-                HTTPS / JSON + WebSocket
-               ┌─────────────▼───────────────────┐        ┌───────────────┐
-               │       Control Plane API           │◀──────▶│  Redis bus    │
-               │  auth · tenancy · api-key +        │  live  │ (multi-      │
-               │  JWKS ingest · projections ·       │  feed  │  instance;    │
-               │  live feed · migrations · eval ·   │        │  optional)    │
-               │  scheduler · WORM anchoring        │        └───────────────┘
-               └──┬────┬────┬────┬────┬─────────────┘
-      ┌───────────┘    │    │    │    └───────────┐
-      ▼                ▼    ▼    ▼                ▼
-┌──────────┐   ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-│  cost    │   │  recorder  │ │ audit/   │ │ gateway  │ │  eval    │
-│ caps +   │   │ hash-chain │ │ SIEM     │ │ policy + │ │ regress  │
-│ kill sw  │   │ run log    │ │ forward  │ │ auth +   │ │ + gate + │
-│ (SQLite) │   │ (JSONL)    │ │ + DLQ    │ │ JWKS     │ │ adapters │
-└──────────┘   └─────┬──────┘ └──────────┘ └──────────┘ └──────────┘
-                     │ Merkle root
-              ┌──────▼───────┐        ┌──────────────────────────────┐
-              │ anchor log    │        │   PostgreSQL — unified        │
-              │ (append-only, │        │   projection (tenants, users, │
-              │  hash-chained;│        │   projects, runs, events,     │
-              │  → S3 option) │        │   decisions, api_keys, evals, │
-              └───────────────┘        │   eval_schedules)             │
-                                       └───────────────────────────────┘
-```
-
-Each engine guarantees something the projection cannot — integer-exact cost
-accounting, a verifiable hash chain, reliable redacted forwarding — so they stay
-the source of truth. PostgreSQL is a fast, joinable view the API writes to inside
-the same request that calls an engine, and integrity-sensitive views re-verify
-against the hash chain on demand. The full design is in
-[docs/architecture.md](docs/architecture.md).
-
-**Stack:** Python 3.12 · FastAPI (async) · SQLAlchemy 2.0 · PostgreSQL ·
-optional Redis (multi-instance bus) · React + TypeScript + Vite · Docker Compose.
-
-## Self-host & compliance posture
-
-- **Nothing phones home.** The only outbound network traffic is to the log sink
-  *you* configure. The default sink is a local file.
-- **Air-gap friendly.** Every engine is standard-library or runs against a local
-  store; the unified store is a Postgres container you own; the reliability
-  suite runs offline.
-- **Secrets stay in `config.json`** (chmod 600), never in environment files or
-  the image.
-- **Multi-tenant from the first row.** Every record carries a tenant id, and a
-  request can only ever touch its own tenant's data and engine scopes.
-- **Tamper-evident by construction**, so the audit trail holds up to scrutiny
-  rather than asking for trust.
-
-The full write-up — data residency, egress, the tamper-evidence threat model and
-its limits, retention, and RBAC — is in
-[docs/self-hosting-compliance.md](docs/self-hosting-compliance.md).
-
-## Quick start (Docker)
+The full stack needs Docker with Compose and the five engine source trees used
+by this repository. Put those trees under one directory and set `ENGINES_SRC`
+to it if they are not next to this checkout.
 
 ```bash
-cp config.example.json config.json     # then edit secrets
+cp config.example.json config.json
 chmod 600 config.json
-make up                                  # builds and starts postgres + api + dashboard
+# Replace every change-me value in config.json before starting.
+export ENGINES_SRC=/path/to/engine-checkouts
+make up
 ```
+
+Then open:
 
 - Dashboard: <http://localhost:8801>
-- API + docs: <http://localhost:8800/docs>
+- API documentation: <http://localhost:8800/docs>
+- Health check: <http://localhost:8800/healthz>
 
-Sign in with the `bootstrap` admin from your `config.json`. `make up` reads the
-Postgres credentials from `config.json` so they match what the API uses — no
-secrets in any committed file.
-
-## Quick start (local, no Docker)
+For local development instead of containers:
 
 ```bash
-make dev                                 # venv with the engines + backend (editable)
+export ENGINES_SRC=/path/to/engine-checkouts
+make dev
+cp config.example.json config.local.json
+# Point database.url and engine data paths at writable local locations.
 . .venv/bin/activate
-export ACP_CONFIG=$PWD/config.local.json # a SQLite-backed config for local runs
-python -m app.cli seed                   # optional: a demonstrable dataset
-python -m app.cli serve                  # API + dashboard on :8800
+export ACP_CONFIG=$PWD/config.local.json
+python -m app.cli seed
+python -m app.cli serve
 ```
 
-## The end-to-end path
+`config.json` and `config.local.json` are ignored. The application reads secrets
+at runtime and does not need a committed environment file.
 
-A single ingested run exercises every engine. This run blows its budget mid-way:
+## Architecture
+
+```text
+ Operators                       Workloads and SDKs
+ dashboard + JWT                 API key or OAuth2 JWT
+       |                                  |
+       +----------------+-----------------+
+                        |
+                 HTTPS + WebSocket
+                        |
+              +---------v----------+       +-------------+
+              | Control Plane API  |<----->| Redis bus   |
+              | auth, RBAC, ingest |       | optional    |
+              +--+---+---+---+---+-+       +-------------+
+                 |   |   |   |   |
+       +---------+   |   |   |   +----------+
+       |             |   |   |              |
+ +-----v----+ +------v+ +v-------+ +--------v-+ +------v-----+
+ | budgets | | run    | | policy | | SIEM and | | evals and  |
+ | and cost| | record | | checks | | anchors  | | gate       |
+ +-----+---+ +----+---+ +----+---+ +-----+----+ +------+-----+
+       |          |          |           |             |
+       +----------+----------+-----------+-------------+
+                              |
+                    PostgreSQL projection
+```
+
+The engines remain authoritative for their integrity-sensitive records.
+PostgreSQL provides the joined operational view used by the API and dashboard.
+See [docs/architecture.md](docs/architecture.md) for data flow and trust
+boundaries.
+
+## A typical run
+
+1. A project authenticates with its API key or an accepted JWT.
+2. The API checks the project gate and records the run.
+3. Usage events update the budget ledger using integer micro-dollars.
+4. Tool calls receive an allow or deny decision under deny-first policy rules.
+5. Each event extends the run's hash chain and can be forwarded to a SIEM sink.
+6. The dashboard receives live updates, while later verification recomputes the
+   chain from the durable record.
+
+Dependency-free examples live in [examples/sdk/](examples/sdk/) and
+[examples/sdk-ts/](examples/sdk-ts/).
+
+## Honest limitations
+
+- This repository is an integration layer, not a standalone monorepo. Local and
+  image builds require the five engine source trees named by
+  `scripts/vendor-engines.sh`.
+- The audit chain is tamper-evident, not tamper-proof. Off-box anchoring improves
+  the evidence, but storage policy and access control still matter.
+- Operator login is JWT-based. There is no turnkey enterprise SSO flow.
+- Redis is optional; without it, live delivery is limited to one API process.
+- Configured JWKS, HTTP evaluation, SIEM, and S3-compatible endpoints can create
+  outbound traffic. There is no telemetry or hosted control service.
+- The supplied bootstrap credentials are examples and must be replaced before
+  any non-local deployment.
+- This is governance infrastructure, not a compliance certification or a
+  substitute for a security review.
+
+The deployment and data-residency notes are in
+[docs/self-hosting-compliance.md](docs/self-hosting-compliance.md).
+
+## Development
 
 ```bash
-TOKEN=$(curl -s localhost:8800/api/v1/auth/login -H 'content-type: application/json' \
-  -d '{"email":"admin@acme.test","password":"…"}' | jq -r .access_token)
-
-curl -s localhost:8800/api/v1/runs/ingest -H "Authorization: Bearer $TOKEN" \
-  -H 'content-type: application/json' -d '{
-    "project_slug": "alpha",
-    "agent_name": "pilot",
-    "usage": [
-      {"model": "assistant", "input_tokens": 9000, "output_tokens": 4000, "cost_usd": 3.10},
-      {"model": "assistant", "input_tokens": 9000, "output_tokens": 4000, "cost_usd": 3.40}
-    ]
-  }'
+make test
+cd frontend && npm run build
 ```
 
-The cost engine records both charges; the second one crosses the project's \$5
-cap, so the decision flips to `deny`, the kill switch latches, and the run is
-marked `killed`. Every step is sealed into the hash chain and forwarded to your
-log sink. `GET /api/v1/runs/{id}/verify` confirms the chain is intact.
+The backend suite covers authentication, tenant boundaries, budgets, policy
+decisions, migrations, hash-chain verification, anchoring, SIEM replay, OAuth2
+ingest, live delivery, and evaluation gates. The frontend build runs TypeScript
+checking before Vite produces the dashboard bundle.
 
-## Testing
+## Repository map
 
-```bash
-make test            # backend: auth, multi-tenancy, the e2e slice, tamper-evidence
-make build           # type-check and build the dashboard
-```
-
-The suite ingests runs, trips a real budget cap, asserts the kill switch and the
-allow/deny decisions, tampers with an on-disk record and confirms verification
-catches it, keeps the hash chain intact across a simulated restart, authenticates
-an agent with a project API key **and with an external-IdP JWT verified against a
-mock JWKS** (expiry/audience/signature/rotation), checks migrations build the
-schema with no drift, drives the SIEM DLQ and replay, streams budget alerts over
-the WebSocket, **fans those frames across two bus instances**, runs and gates
-evals **through the golden and http adapters** (the latter against a live local
-model server), **anchors the hash chain and detects run drift** (plus a SigV4 S3
-upload), and exercises the tenant/user/project admin routes.
-
-## Project layout
-
-```
-backend/    FastAPI app — config, data model, auth, engine adapters, routers, tests
-backend/app/evals/  eval adapters (golden + http) and the suite registry
-backend/app/anchor.py  WORM Merkle anchoring (+ SigV4 S3 upload)
-backend/alembic/  migration history (schema is brought to head on startup)
-frontend/   React + TypeScript cockpit dashboard
-deploy/     Dockerfiles + nginx config
-scripts/    dev-setup, vendor-engines, up, publish
-examples/   dependency-free quickstart SDKs (sdk/ Python, sdk-ts/ TypeScript)
-docs/       architecture, self-host/compliance guarantees, diagram
+```text
+backend/     FastAPI application, migrations, engine adapters, and tests
+frontend/    React and TypeScript dashboard
+deploy/      Container images and nginx configuration
+examples/    Minimal Python and TypeScript clients
+docs/        Architecture and self-hosting notes
+scripts/     Local setup, engine staging, stack startup, and release audit
 ```
 
 ## License
