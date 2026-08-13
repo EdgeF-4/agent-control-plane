@@ -3,6 +3,11 @@ config.json
 config.local.json
 config.*.json
 !config.example.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
 
 # Local publish-gate pattern list (see scripts/publish.sh)
 .publish-banned
