@@ -16,6 +16,11 @@ from ..security import verify_access_token
 
 router = APIRouter()
 
+_AUTH_FAILURE = (
+    "Authentication failed. Sign in again, replace the token in the WebSocket URL, "
+    "and reconnect."
+)
+
 
 @router.websocket("/live")
 async def live(websocket: WebSocket, token: str = Query(...)) -> None:
@@ -25,18 +30,18 @@ async def live(websocket: WebSocket, token: str = Query(...)) -> None:
 
     identity = verify_access_token(settings.auth, token)
     if identity is None:
-        await websocket.close(code=4401)
+        await websocket.close(code=4401, reason=_AUTH_FAILURE)
         return
     try:
         user_id = uuid.UUID(identity.client_id)
     except ValueError:
-        await websocket.close(code=4401)
+        await websocket.close(code=4401, reason=_AUTH_FAILURE)
         return
 
     async with db.sessionmaker() as session:
         user = await session.get(models.User, user_id)
         if user is None:
-            await websocket.close(code=4401)
+            await websocket.close(code=4401, reason=_AUTH_FAILURE)
             return
         tenant_id = str(user.tenant_id)
 

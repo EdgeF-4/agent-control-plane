@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 DEFAULT_PATHS = ("config.json", "/config/config.json")
 
@@ -91,6 +91,21 @@ def find_config_path(explicit: str | None = None) -> str:
 
 def load_settings(path: str | None = None) -> Settings:
     cfg_path = find_config_path(path)
-    with open(cfg_path, "r", encoding="utf-8") as fh:
-        raw = json.load(fh)
-    return Settings(**raw)
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            "config.json is not valid JSON near "
+            f"line {error.lineno}, column {error.colno}. Run "
+            "'python -m json.tool config.json', correct the reported syntax, "
+            "and start again."
+        ) from error
+    try:
+        return Settings(**raw)
+    except ValidationError as error:
+        raise ValueError(
+            "config.json does not match the required schema. Correct the fields "
+            "listed below using config.example.json, then start again.\n"
+            f"{error}"
+        ) from error

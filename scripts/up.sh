@@ -11,6 +11,11 @@ if [ ! -f config.json ]; then
   exit 1
 fi
 
+if ! python3 -m json.tool config.json >/dev/null; then
+  echo "Invalid config.json. Run 'python3 -m json.tool config.json', correct the reported syntax, then retry 'make up'." >&2
+  exit 1
+fi
+
 bash scripts/vendor-engines.sh
 
 read_cfg() { python3 -c "import json,sys;print(json.load(open('config.json'))['database'][sys.argv[1]])" "$1"; }

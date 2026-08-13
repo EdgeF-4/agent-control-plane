@@ -20,6 +20,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .engines import EngineHub
 from .eval_service import run_due_schedules
+from .errors import install_error_handlers
 from .live import EventBus
 from .migrations import apply_migrations
 from .routers import admin, audit, auth, budgets, evals, live, overview, projects, runs, siem
@@ -36,7 +37,10 @@ async def _eval_scheduler(db: Database, hub: EngineHub, tick_seconds: int) -> No
         except asyncio.CancelledError:
             raise
         except Exception:  # a bad run must never kill the loop
-            _log.exception("eval scheduler tick failed")
+            _log.exception(
+                "eval scheduler tick failed; inspect this traceback and correct the "
+                "failing schedule or adapter before the next tick"
+            )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -80,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         summary="Self-hosted governance, observability, audit and cost control for automated agents.",
         lifespan=lifespan,
     )
+    install_error_handlers(app)
 
     if settings.server.cors_origins:
         app.add_middleware(

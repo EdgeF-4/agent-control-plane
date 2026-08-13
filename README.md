@@ -1,10 +1,12 @@
 # Agent Control Plane
 
-[![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
+Agent Control Plane is a self-hosted governance and audit console for platform
+and compliance teams running automated workloads. It combines run visibility,
+enforced budgets, policy decisions, and a tamper-evident event record so those
+teams can keep operational data under their control instead of sending it to a
+hosted service or rebuilding the same controls in every runtime.
 
-A self-hosted governance and audit console for teams running automated agents.
-It combines run visibility, enforced budgets, policy decisions, and a
-tamper-evident event record without requiring a hosted control-plane service.
+[![License](https://img.shields.io/github/license/EdgeF-4/agent-control-plane)](LICENSE)
 
 > **Visibility recommendation:** keep this repository private. It is an
 > integration source snapshot, not a standalone distribution. Both installation
@@ -287,6 +289,23 @@ snapshot until every engine source has a public or packaged route.
 ```
 
 ## Troubleshooting
+
+### An API request or WebSocket connection fails
+
+Every HTTP error response includes both `detail` and `next_action`. Validation,
+authentication, authorization, missing-resource, conflict, and unexpected
+server failures use the same envelope. A rejected WebSocket connection includes
+an actionable close reason. Follow `next_action` before retrying. If a 500
+response repeats, run `docker compose logs backend` and give the operator the
+request path and time.
+
+Source holders can exercise the five HTTP failure families without starting the
+full stack:
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m pytest -q --noconftest \
+  backend/tests/test_actionable_errors.py
+```
 
 ### `Missing required engine source directories`
 
