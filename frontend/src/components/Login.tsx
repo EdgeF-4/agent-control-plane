@@ -15,7 +15,7 @@ export default function Login({ onAuthed }: { onAuthed: (u: User, token: string)
       const r = await api.login(email, password);
       onAuthed(r.user, r.access_token);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "login failed");
+      setErr(e instanceof Error ? e.message : "Login failed. Check the credentials, then retry.");
     } finally {
       setBusy(false);
     }

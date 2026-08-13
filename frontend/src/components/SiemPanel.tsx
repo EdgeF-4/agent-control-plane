@@ -24,8 +24,11 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
     try {
       const r = await api.siemTestSink(name);
       setTests((t) => ({ ...t, [name]: r }));
-    } catch {
-      setTests((t) => ({ ...t, [name]: { ok: false, detail: "test failed" } }));
+    } catch (error) {
+      const detail = error instanceof Error
+        ? error.message
+        : "Sink test failed. Check the sink configuration and backend logs, then retry.";
+      setTests((t) => ({ ...t, [name]: { ok: false, detail } }));
     }
   }
 
@@ -112,7 +115,9 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
             <div className="dlq-row" key={i}>
               <span className="mono">{e.sink}</span>
               <span className="sub">{e.event_count} event{e.event_count === 1 ? "" : "s"} · {e.attempts} attempts · {ago(e.failed_at)}</span>
-              <span className="dlq-err" title={e.error}>{e.error}</span>
+              <span className="dlq-err" title={`${e.error} Correct the sink configuration, then replay this batch.`}>
+                {e.error} Next: correct the sink configuration, then replay this batch.
+              </span>
             </div>
           ))}
         </div>

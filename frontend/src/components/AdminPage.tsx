@@ -44,7 +44,9 @@ function ProjectsTab() {
       await api.createProject({ slug, name: name || slug, budget_usd: budget });
       setSlug(""); setName("");
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : "failed"); }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Create failed. Correct the project fields, then retry.");
+    }
   }
   async function toggleGate(p: Project) {
     await api.setEvalGate(p.slug, p.eval_gate_suite ? null : GATE_SUITE);
@@ -172,7 +174,9 @@ function UsersTab({ me }: { me: User }) {
       await api.createUser({ email, password, name, role });
       setEmail(""); setName(""); setPassword("");
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : "failed"); }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Create failed. Correct the user fields, then retry.");
+    }
   }
 
   return (
@@ -238,7 +242,9 @@ function TenantsTab() {
       await api.createTenant({ slug, name: name || slug, admin_email: email, admin_password: password });
       setSlug(""); setName(""); setEmail(""); setPassword("");
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : "failed"); }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Create failed. Correct the tenant fields, then retry.");
+    }
   }
 
   return (

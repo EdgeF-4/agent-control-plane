@@ -12,9 +12,18 @@ export function setToken(token: string | null) {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
+  constructor(public status: number, detail: string, public nextAction: string) {
+    super(`${detail} Next: ${nextAction}`);
   }
+}
+
+function fallbackAction(status: number): string {
+  if (status === 401) return "Sign in again, then retry.";
+  if (status === 403) return "Ask an administrator for the required role or project scope, then retry.";
+  if (status === 404) return "Refresh the page, correct the resource identifier, then retry.";
+  if (status === 409) return "Refresh the resource, resolve its current state, then retry.";
+  if (status === 422) return "Correct the invalid fields, then retry.";
+  return "Retry once. If it fails again, ask the operator to inspect the backend logs.";
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -24,14 +33,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`/api/v1${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError(
+      0,
+      "Cannot reach the control plane API.",
+      "Confirm the stack is running and the browser is using the dashboard URL, then retry.",
+    );
+  }
   if (!res.ok) {
     let detail = res.statusText;
+    let nextAction = fallbackAction(res.status);
     try {
       const body = await res.json();
       detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      if (typeof body.next_action === "string" && body.next_action.trim()) {
+        nextAction = body.next_action;
+      }
     } catch { /* keep statusText */ }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, nextAction);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
