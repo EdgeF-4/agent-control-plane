@@ -42,7 +42,11 @@ function Toast({ alert, onDismiss }: { alert: ToastAlert; onDismiss: (id: number
         <div className="toast-title">
           {alert.project} · {alert.kind}
         </div>
-        <div className="toast-msg">{alert.message}</div>
+        <div className="toast-msg">
+          {alert.message}
+          {alert.kind !== "release" &&
+            " Next: review the project budget and release or raise it before retrying blocked work."}
+        </div>
       </div>
     </div>
   );

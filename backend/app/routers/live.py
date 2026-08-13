@@ -53,7 +53,7 @@ async def live(websocket: WebSocket, token: str = Query(...)) -> None:
             message = await queue.get()
             await websocket.send_json(message)
     except WebSocketDisconnect:
-        pass
+        return
     except asyncio.CancelledError:
         raise
     finally:

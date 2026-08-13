@@ -10,6 +10,7 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
   const [tests, setTests] = useState<Record<string, { ok: boolean; detail: string } | "running">>({});
   const [showPresets, setShowPresets] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [replayError, setReplayError] = useState("");
 
   const load = useCallback(async () => {
     const [s, d] = await Promise.all([api.siemStatus(), api.siemDlq()]);
@@ -35,7 +36,12 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
   async function replayAll() {
     setBusy(true);
     try {
-      await api.siemReplay();
+      const result = await api.siemReplay();
+      setReplayError(
+        result.failed
+          ? `Replay left ${result.failed} failed batch(es). Next: ${result.next_action}`
+          : ""
+      );
       await load();
     } finally {
       setBusy(false);
@@ -85,7 +91,9 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
                   {t === "running" && <span className="sub">testing…</span>}
                   {t && t !== "running" && (
                     <span className={`pill-int ${t.ok ? "ok" : "bad"}`} title={t.detail}>
-                      {t.ok ? "✓ reachable" : "✗ unreachable"}
+                      {t.ok
+                        ? "✓ reachable"
+                        : "✗ unreachable. Next: correct the sink configuration or destination, then test again."}
                     </span>
                   )}
                 </div>
@@ -110,13 +118,14 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
               </button>
             )}
           </div>
+          {replayError && <div className="inline-err">{replayError}</div>}
           {dlq.length === 0 && <div className="empty small">Nothing dead-lettered. Every batch delivered.</div>}
           {dlq.map((e, i) => (
             <div className="dlq-row" key={i}>
               <span className="mono">{e.sink}</span>
               <span className="sub">{e.event_count} event{e.event_count === 1 ? "" : "s"} · {e.attempts} attempts · {ago(e.failed_at)}</span>
-              <span className="dlq-err" title={`${e.error} Correct the sink configuration, then replay this batch.`}>
-                {e.error} Next: correct the sink configuration, then replay this batch.
+              <span className="dlq-err" title={`${e.error} Next: ${e.next_action}`}>
+                {e.error} Next: {e.next_action}
               </span>
             </div>
           ))}
@@ -139,13 +148,19 @@ export default function SiemPanel({ isAdmin }: { isAdmin: boolean }) {
 
 function PresetCard({ preset }: { preset: SiemPreset }) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const snippet = JSON.stringify(preset.config, null, 2);
   async function copy() {
     try {
       await navigator.clipboard.writeText(snippet);
+      setCopyError("");
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard unavailable */ }
+    } catch {
+      setCopyError(
+        "Copy failed. Next: select the configuration text below and copy it manually."
+      );
+    }
   }
   return (
     <div className="preset">
@@ -157,6 +172,7 @@ function PresetCard({ preset }: { preset: SiemPreset }) {
         <button className="btn ghost" onClick={copy}>{copied ? "Copied ✓" : "Copy"}</button>
       </div>
       <div className="preset-desc">{preset.description}</div>
+      {copyError && <div className="inline-err">{copyError}</div>}
       <pre className="preset-code">{snippet}</pre>
     </div>
   );

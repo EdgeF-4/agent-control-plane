@@ -13,21 +13,44 @@ for engine in "${ENGINES[@]}"; do
   [ -f "$SRC/$engine/pyproject.toml" ] || missing+=("$engine")
 done
 if [ "${#missing[@]}" -ne 0 ]; then
-  echo "Missing required engine source directories under: $SRC" >&2
+  echo "Missing required engine source directories under: $SRC. Next: obtain every directory listed below, run 'export ENGINES_SRC=/path/to/engine-checkouts', then rerun 'make dev'." >&2
   printf '  %s\n' "${missing[@]}" >&2
-  echo "Set ENGINES_SRC to their parent directory. See README.md." >&2
   exit 2
 fi
 
-python3 -m venv .venv
+if python3 -m venv .venv; then
+  :
+else
+  status=$?
+  echo "Virtual-environment creation failed with exit $status. The raw Python failure is above. Next: install the Python venv support named by that failure, then rerun 'make dev'." >&2
+  exit "$status"
+fi
 . .venv/bin/activate
-pip install -U pip setuptools wheel
+if pip install -U pip setuptools wheel; then
+  :
+else
+  status=$?
+  echo "Build-tool installation failed with exit $status. The raw package-manager failure is above. Next: correct the reported registry, certificate, or interpreter problem, then rerun 'make dev'." >&2
+  exit "$status"
+fi
 engine_args=()
 for engine in "${ENGINES[@]}"; do
   engine_args+=("-e" "$SRC/$engine")
 done
-pip install "${engine_args[@]}"
-pip install -e "./backend[dev]"
+if pip install "${engine_args[@]}"; then
+  :
+else
+  status=$?
+  echo "Engine installation failed with exit $status. The raw package-manager failure is above. Next: correct the first reported engine build or dependency error, then rerun 'make dev'." >&2
+  exit "$status"
+fi
+if pip install -e "./backend[dev]"; then
+  :
+else
+  status=$?
+  echo "Backend installation failed with exit $status. The raw package-manager failure is above. Next: correct the first reported backend build or dependency error, then rerun 'make dev'." >&2
+  exit "$status"
+fi
 
 echo
 echo "Dev environment ready."

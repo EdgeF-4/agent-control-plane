@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,13 +25,30 @@ class Rule:
 SKIP_PATHS = {"scripts/public_release_check.py"}
 
 
+class ActionableArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        self.print_usage()
+        self.exit(
+            2,
+            "error: "
+            f"{message}. Next: provide the deny file and rerun: "
+            "python3 scripts/public_release_check.py --deny-file "
+            ".public-release-deny-patterns\n",
+        )
+
+
 def run_git(repo: Path, *args: str) -> bytes:
-    return subprocess.run(
+    result = subprocess.run(
         ["git", "-C", str(repo), *args],
-        check=True,
+        check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-    ).stdout
+    )
+    if result.returncode:
+        raw = decode(result.stderr).strip() or "git returned no diagnostic"
+        command = shlex.join(["git", "-C", str(repo), *args])
+        raise RuntimeError(f"{command} failed with exit {result.returncode}: {raw}")
+    return result.stdout
 
 
 def decode(data: bytes) -> str:
@@ -213,29 +231,58 @@ def scan_metadata(repo: Path, findings: set[tuple[str, str, int, str]], rules: l
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = ActionableArgumentParser()
     parser.add_argument("--deny-file", type=Path, required=True)
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
+    rerun = shlex.join(
+        ["python3", "scripts/public_release_check.py", "--deny-file", str(args.deny_file)]
+    )
 
     if not args.deny_file.is_file():
         print("BLOCK configuration: private deny file is missing")
-        print("Copy .public-release-deny-patterns.example to the ignored local path and populate it.")
+        print(
+            "Next: copy .public-release-deny-patterns.example to "
+            f"{args.deny_file}, add the owner-approved private patterns, then rerun: {rerun}"
+        )
         return 2
     try:
         rules = built_in_rules() + load_private_rules(args.deny_file)
     except ValueError as error:
         print(f"BLOCK configuration: {error}")
+        print(
+            f"Next: correct {args.deny_file} at the reported line or add at least "
+            f"one active pattern, then rerun: {rerun}"
+        )
+        return 2
+    except OSError as error:
+        print(f"BLOCK configuration: cannot read {args.deny_file}: {error}")
+        print(
+            f"Next: correct the file path or read permission, then rerun: {rerun}"
+        )
         return 2
 
     findings: set[tuple[str, str, int, str]] = set()
-    scan_worktree(repo, findings, rules)
-    scan_history(repo, findings, rules)
-    scan_metadata(repo, findings, rules)
+    try:
+        scan_worktree(repo, findings, rules)
+        scan_history(repo, findings, rules)
+        scan_metadata(repo, findings, rules)
+    except (OSError, RuntimeError) as error:
+        print(f"BLOCK scan: {error}")
+        print(
+            "Next: correct the reported repository, permission, or object error, "
+            f"then rerun: {rerun}"
+        )
+        return 2
     for source, location, line, rule in sorted(findings):
         print(f"BLOCK {source}:{location}:{line}: {rule}")
     if findings:
         print(f"Release blocked: {len(findings)} finding(s). Matched values were not printed.")
+        print(
+            "Next: correct every BLOCK location in the current files. If a finding "
+            "is in reachable history, stop and obtain owner approval before any "
+            f"history rewrite. Then rerun: {rerun}"
+        )
         return 1
     print("Release check passed across tracked files and all reachable Git history.")
     return 0

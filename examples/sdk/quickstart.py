@@ -22,7 +22,12 @@ def main() -> int:
     base_url = os.environ.get("ACP_URL", "http://127.0.0.1:8800")
     api_key = os.environ.get("ACP_API_KEY")
     if not api_key:
-        print("set ACP_API_KEY to a project ingest key (Admin -> Projects -> Keys)", file=sys.stderr)
+        print(
+            "ACP_API_KEY is missing. Next: mint a project key under Admin -> "
+            "Projects -> Keys, run 'export ACP_API_KEY=<project-key>', then rerun "
+            "'python quickstart.py'.",
+            file=sys.stderr,
+        )
         return 2
 
     cp = ControlPlane(base_url, api_key)
@@ -34,7 +39,10 @@ def main() -> int:
             )
             print(f"usage recorded: ${outcome['cost_usd']:.4f}, budget state {outcome['state']}")
             if not outcome["allowed"]:
-                print("budget kill switch engaged — stopping early")
+                print(
+                    "budget kill switch engaged. Next: ask an administrator to "
+                    "release or raise the project budget before starting more work."
+                )
                 return 0
 
             # Record a tool call and see the policy decision.
@@ -45,6 +53,13 @@ def main() -> int:
         return 0
     except ControlPlaneError as exc:
         print(f"control plane refused the call: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(
+            f"quickstart failed: {type(exc).__name__}: {exc}. Next: correct the "
+            "reported local error, then rerun 'python quickstart.py'.",
+            file=sys.stderr,
+        )
         return 1
 
 

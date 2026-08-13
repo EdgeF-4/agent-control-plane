@@ -141,6 +141,14 @@ public distribution today.
 **Stack:** Python 3.12 · FastAPI (async) · SQLAlchemy 2.0 · PostgreSQL ·
 React + TypeScript + Vite · Docker Compose.
 
+### Dependency decision
+
+Runtime packages use bounded major-version ranges so compatible fixes can land
+without silently crossing breaking releases. The five engine packages remain
+source-checkout dependencies without independently resolvable public versions.
+That coupling is deliberate for this integration snapshot, but it is also why
+the repository cannot claim a complete public dependency verdict.
+
 ## Self-host & compliance posture
 
 - **No product telemetry is configured.** The default runtime sink is a local

@@ -204,6 +204,7 @@ class UsageOutcome(BaseModel):
     alerts: list[str]
     violations: list[dict]
     run_status: str
+    next_action: str | None = None
 
 
 class VerifyResult(BaseModel):
@@ -211,6 +212,7 @@ class VerifyResult(BaseModel):
     event_count: int
     broken_index: int | None = None
     reason: str | None = None
+    next_action: str | None = None
 
 
 # --- evals ----------------------------------------------------------------- #

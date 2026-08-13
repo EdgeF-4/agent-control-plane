@@ -122,5 +122,6 @@ async def assert_promotion_allowed(session: AsyncSession, tenant_id, project: mo
     if row is not None and row.has_regressions:
         raise EvalGateError(
             f"promotion blocked by eval gate: suite '{suite}' has a regression "
-            f"(latest run {row.passed}/{row.total} passing)"
+            f"(latest run {row.passed}/{row.total} passing). Review the stored "
+            "diff, correct the regressed cases, rerun the suite, then retry the run"
         )

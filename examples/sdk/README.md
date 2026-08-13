@@ -22,7 +22,10 @@ with cp.open_run(agent_name="nightly-report", label="weekly digest") as run:
         model="assistant-large", input_tokens=1200, output_tokens=350, cost_usd=0.12,
     )
     if not outcome["allowed"]:
-        raise SystemExit("budget kill switch engaged")
+        raise SystemExit(
+            "budget kill switch engaged; ask an administrator to release or "
+            "raise the project budget before retrying"
+        )
 
     run.record_tool_call(tool="search", server="web", arguments={"q": "market size"})
 # the run closes automatically on exit (as "error" if the block raised)
@@ -44,11 +47,15 @@ python quickstart.py
 
 ```bash
 BASE=http://127.0.0.1:8800; KEY=acp_your_project_key
-RUN=$(curl -s -X POST $BASE/api/v1/runs -H "authorization: Bearer $KEY" \
+RUN=$(curl --fail-with-body --show-error -sS -X POST $BASE/api/v1/runs -H "authorization: Bearer $KEY" \
   -H 'content-type: application/json' -d '{"agent_name":"curl","label":"demo"}' | jq -r .id)
-curl -s -X POST $BASE/api/v1/runs/$RUN/usage -H "authorization: Bearer $KEY" \
+curl --fail-with-body --show-error -sS -X POST $BASE/api/v1/runs/$RUN/usage -H "authorization: Bearer $KEY" \
   -H 'content-type: application/json' \
   -d '{"model":"assistant-large","input_tokens":1200,"output_tokens":350,"cost_usd":0.12}'
-curl -s -X POST $BASE/api/v1/runs/$RUN/complete -H "authorization: Bearer $KEY" \
+curl --fail-with-body --show-error -sS -X POST $BASE/api/v1/runs/$RUN/complete -H "authorization: Bearer $KEY" \
   -H 'content-type: application/json' -d '{"status":"completed"}'
 ```
+
+On an HTTP failure, the response contains `detail` and `next_action`. Follow
+`next_action`, then rerun the failed command. If curl cannot connect, confirm
+the stack is running and `BASE` is correct before retrying.

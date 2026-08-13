@@ -8,6 +8,7 @@ are guarded here.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ from agent_eval.store import Store as EvalStore
 from agent_eval.suite import suite_from_dict
 
 from ..config import Settings
+
+_log = logging.getLogger("control_plane.engines")
 
 
 @dataclass
@@ -367,6 +370,11 @@ class EngineHub:
         try:
             run._bytes = os.path.getsize(run.path) if run.path else 0
         except OSError:  # pragma: no cover - file vanished between load and stat
+            _log.exception(
+                "could not measure the resumed run record; preserve the data "
+                "directory, correct its path or permissions, then verify the run "
+                "before accepting more events"
+            )
             run._bytes = 0
         # Preserve a prior size-cap truncation so we don't append past it.
         if isinstance(events[-1].get("payload"), dict) and events[-1]["payload"].get("truncated"):
@@ -382,6 +390,12 @@ class EngineHub:
             "event_count": len(events),
             "broken_index": result.broken_index,
             "reason": result.reason,
+            "next_action": (
+                None
+                if result.ok
+                else "Stop relying on this run, preserve its record, and investigate "
+                "the reported broken index before accepting it as evidence."
+            ),
         }
 
     def load_run_events(self, external_run_id: str) -> list[dict]:
@@ -426,9 +440,25 @@ class EngineHub:
         with self._lock:
             sink = next((s for s in self.siem.sinks if s.name == name), None)
             if sink is None:
-                return {"ok": False, "detail": f"no sink named {name!r}"}
+                return {
+                    "ok": False,
+                    "detail": f"no sink named {name!r}",
+                    "next_action": (
+                        "Add the sink under engines.siem.sinks in config.json, "
+                        "restart the stack, then test it again."
+                    ),
+                }
             result = sink.test()
-            return {"ok": bool(result.ok), "detail": result.detail}
+            return {
+                "ok": bool(result.ok),
+                "detail": result.detail,
+                "next_action": (
+                    None
+                    if result.ok
+                    else "Correct the sink configuration or destination, restart "
+                    "the stack if configuration changed, then test it again."
+                ),
+            }
 
     def siem_dlq_entries(self, limit: int = 100) -> list[dict]:
         """Summaries of dead-lettered batches awaiting replay (no raw payloads)."""
@@ -438,6 +468,10 @@ class EngineHub:
                 {
                     "sink": e.sink,
                     "error": e.error,
+                    "next_action": (
+                        "Correct this sink's configuration or destination, then "
+                        "replay the dead-lettered batch."
+                    ),
                     "attempts": e.attempts,
                     "failed_at": e.failed_at,
                     "event_count": len(e.events),
@@ -457,11 +491,17 @@ class EngineHub:
                 sink.emit(events)
 
             result = self.siem.dlq.replay(deliver, sink_filter=sink_filter, limit=limit)
-            return {
+            response = {
                 "replayed": result.replayed,
                 "failed": result.failed,
                 "skipped": result.skipped,
             }
+            if result.failed:
+                response["next_action"] = (
+                    "Inspect the remaining dead-letter entries, correct each sink "
+                    "failure, then replay them again."
+                )
+            return response
 
     # ------------------------------------------------------------------ #
     # Eval (reliability/regression)
@@ -490,9 +530,15 @@ class EngineHub:
                 try:
                     run.close()
                 except Exception:
-                    pass
+                    _log.exception(
+                        "run recorder close failed; preserve the data directory and "
+                        "inspect this traceback before restarting the service"
+                    )
             self._runs.clear()
             try:
                 self.siem.close()
             except Exception:
-                pass
+                _log.exception(
+                    "audit pipeline close failed; preserve the dead-letter directory "
+                    "and inspect this traceback before restarting the service"
+                )

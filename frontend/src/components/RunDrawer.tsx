@@ -50,7 +50,9 @@ export default function RunDrawer({ runId, onClose }: { runId: string; onClose: 
           <span className="right" style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             {verify && (
               <span className={`pill-int ${verify.ok ? "ok" : "bad"}`}>
-                {verify.ok ? "✓ chain intact" : `✗ broken @ ${verify.broken_index}`}
+                {verify.ok
+                  ? "✓ chain intact"
+                  : `✗ broken @ ${verify.broken_index}. Next: ${verify.next_action}`}
               </span>
             )}
             <button className="btn" onClick={runVerify} disabled={verifying}>

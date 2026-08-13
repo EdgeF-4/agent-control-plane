@@ -25,10 +25,25 @@ from typing import Any, Optional
 class ControlPlaneError(Exception):
     """An API call was refused (bad key, budget kill switch, gate, etc.)."""
 
-    def __init__(self, status: int, detail: str) -> None:
-        super().__init__(f"HTTP {status}: {detail}")
+    def __init__(self, status: int, detail: str, next_action: str) -> None:
+        super().__init__(f"HTTP {status}: {detail} Next: {next_action}")
         self.status = status
         self.detail = detail
+        self.next_action = next_action
+
+
+def _fallback_action(status: int) -> str:
+    if status == 401:
+        return "mint or replace the project key, update ACP_API_KEY, then retry"
+    if status == 403:
+        return "use a key scoped to this project or ask an administrator for access, then retry"
+    if status == 404:
+        return "list the available projects or runs, correct the identifier, then retry"
+    if status == 409:
+        return "refresh the run state, resolve the conflict, then retry"
+    if status == 422:
+        return "correct the fields named by the response, then retry"
+    return "retry once; if it fails again, ask the operator to inspect the backend logs"
 
 
 class ControlPlane:
@@ -38,23 +53,62 @@ class ControlPlane:
         self.timeout = timeout
 
     def _post(self, path: str, body: dict) -> dict:
-        request = urllib.request.Request(
-            self.base_url + path,
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "content-type": "application/json",
-                # Bearer and X-API-Key are both accepted; Bearer keeps it simple.
-                "authorization": f"Bearer {self.api_key}",
-            },
-            method="POST",
-        )
+        try:
+            request = urllib.request.Request(
+                self.base_url + path,
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "content-type": "application/json",
+                    # Bearer and X-API-Key are both accepted; Bearer keeps it simple.
+                    "authorization": f"Bearer {self.api_key}",
+                },
+                method="POST",
+            )
+        except (TypeError, ValueError) as exc:
+            raise ControlPlaneError(
+                0,
+                f"cannot build the request: {exc}",
+                "correct ACP_URL and make every request field JSON-serializable, then retry",
+            ) from exc
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read()
-                return json.loads(raw) if raw else {}
+                if not raw:
+                    return {}
+                try:
+                    parsed = json.loads(raw)
+                    if not isinstance(parsed, dict):
+                        raise ValueError("the response root is not an object")
+                    return parsed
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+                    raise ControlPlaneError(
+                        response.status,
+                        "the API returned a non-JSON success response",
+                        "ask the operator to inspect the reverse proxy and backend logs, then retry",
+                    ) from exc
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")
-            raise ControlPlaneError(exc.code, detail) from exc
+            raw = exc.read().decode("utf-8", "replace")
+            detail = raw or exc.reason or "request refused"
+            next_action = _fallback_action(exc.code)
+            try:
+                body = json.loads(raw)
+            except json.JSONDecodeError:
+                body = None
+            if isinstance(body, dict):
+                value = body.get("detail")
+                if value is not None:
+                    detail = value if isinstance(value, str) else json.dumps(value)
+                action = body.get("next_action")
+                if isinstance(action, str) and action.strip():
+                    next_action = action
+            raise ControlPlaneError(exc.code, str(detail), next_action) from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            reason = getattr(exc, "reason", str(exc))
+            raise ControlPlaneError(
+                0,
+                f"cannot reach {self.base_url}: {reason}",
+                "confirm the stack is running and ACP_URL is correct, then retry",
+            ) from exc
 
     def open_run(self, *, agent_name: str = "", label: str = "",
                  meta: Optional[dict] = None) -> "Run":
@@ -62,6 +116,12 @@ class ControlPlane:
         data = self._post("/api/v1/runs", {
             "agent_name": agent_name, "label": label, "meta": meta or {},
         })
+        if not isinstance(data, dict) or not isinstance(data.get("id"), str):
+            raise ControlPlaneError(
+                502,
+                "the API success response did not contain a run id",
+                "ask the operator to inspect the backend and proxy logs, then retry",
+            )
         return Run(self, data["id"])
 
 

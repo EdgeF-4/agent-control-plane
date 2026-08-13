@@ -85,7 +85,9 @@ def find_config_path(explicit: str | None = None) -> str:
         if c and Path(c).is_file():
             return c
     raise FileNotFoundError(
-        "no config.json found; set ACP_CONFIG or copy config.example.json to config.json"
+        "no config.json found. Next: copy config.example.json to config.json, "
+        "set its secrets, run 'chmod 600 config.json', set ACP_CONFIG if using "
+        "another path, then rerun the failed control-plane command"
     )
 
 

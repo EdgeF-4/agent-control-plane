@@ -57,7 +57,7 @@ export function BudgetPanel({ budgets }: { budgets: Budget[] }) {
                 <span style={{ width: `${Math.min(100, frac * 100)}%` }} />
               </div>
               {b.state === "deny" && (
-                <div className="tag">⛔ cap reached — kill switch engaged, new work blocked</div>
+                <div className="tag">⛔ cap reached. Next: ask an administrator to release or raise this budget before retrying work.</div>
               )}
             </div>
           );
@@ -175,4 +175,3 @@ export function AuditPanel({ entries }: { entries: AuditEntry[] }) {
     </div>
   );
 }
-

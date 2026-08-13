@@ -187,7 +187,11 @@ async def report_usage(
         run.ended_at = datetime.now(timezone.utc)
         kill_sealed = await asyncio.to_thread(
             hub.emit, run.external_run_id, "error",
-            {"reason": "budget cap reached; kill switch engaged"}, name="kill_switch",
+            {
+                "reason": "budget cap reached; ask an administrator to release or "
+                "raise the budget before retrying work"
+            },
+            name="kill_switch",
         )
         if kill_sealed:
             session.add(_project_event(run, kill_sealed))
@@ -227,6 +231,12 @@ async def report_usage(
         alerts=outcome.alerts,
         violations=outcome.violations,
         run_status=run.status,
+        next_action=(
+            "Ask an administrator to release or raise the project budget before "
+            "retrying work."
+            if not outcome.allowed
+            else None
+        ),
     )
 
 
@@ -252,7 +262,10 @@ async def report_tool_call(
     if not policy_ok:
         reason = f"policy denies {payload.server}__{payload.tool}"
     elif not cost_dec.allowed:
-        reason = "blocked by budget kill switch"
+        reason = (
+            "blocked by budget kill switch; ask an administrator to release or "
+            "raise the budget before retrying"
+        )
     else:
         reason = "allowed"
 

@@ -38,7 +38,8 @@ def _alembic_dir() -> Path:
             return base
     raise FileNotFoundError(
         "could not locate alembic.ini; set ACP_ALEMBIC_DIR to the directory "
-        "that contains it and the alembic/ scripts"
+        "that contains it and the alembic/ scripts, then rerun the failed "
+        "control-plane command"
     )
 
 

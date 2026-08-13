@@ -77,7 +77,7 @@ export default function EvalsPanel({
               <div style={{ color: "var(--muted)" }}>{latest.passed}/{latest.total} cases pass</div>
               <div style={{ marginLeft: "auto" }}>
                 {latest.has_regressions === true
-                  ? <span className="pill-int bad">▼ regressions</span>
+                  ? <span className="pill-int bad">▼ regressions. Next: view the diff, correct the regressed cases, then rerun the suite.</span>
                   : <span className="pill-int ok">✓ no regressions</span>}
               </div>
             </div>

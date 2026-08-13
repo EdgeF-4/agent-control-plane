@@ -7,7 +7,11 @@ this with a shared broker; the publish/subscribe surface stays the same.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
+
+
+_log = logging.getLogger("control_plane.live")
 
 
 class EventBus:
@@ -27,5 +31,10 @@ class EventBus:
             try:
                 queue.put_nowait(message)
             except asyncio.QueueFull:
-                # A slow client never blocks the producer; it just drops frames.
-                pass
+                # A slow client never blocks the producer, but the operator gets
+                # a concrete recovery action instead of an invisible data gap.
+                _log.warning(
+                    "live subscriber queue is full and an update was dropped; "
+                    "refresh the affected dashboard, then investigate client or "
+                    "network slowness if it repeats"
+                )

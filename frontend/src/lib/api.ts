@@ -2,6 +2,13 @@
 // every request is scoped to the caller's tenant on the server.
 
 const TOKEN_KEY = "acp_token";
+export const ACTIONABLE_ERROR_EVENT = "acp-actionable-error";
+
+export function reportActionableError(message: string) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent<string>(ACTIONABLE_ERROR_EVENT, { detail: message }));
+  }
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -37,11 +44,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     res = await fetch(`/api/v1${path}`, { ...init, headers });
   } catch {
-    throw new ApiError(
+    const error = new ApiError(
       0,
       "Cannot reach the control plane API.",
       "Confirm the stack is running and the browser is using the dashboard URL, then retry.",
     );
+    reportActionableError(error.message);
+    throw error;
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -52,11 +61,25 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (typeof body.next_action === "string" && body.next_action.trim()) {
         nextAction = body.next_action;
       }
-    } catch { /* keep statusText */ }
-    throw new ApiError(res.status, detail, nextAction);
+    } catch {
+      detail = detail || `HTTP ${res.status}`;
+    }
+    const error = new ApiError(res.status, detail, nextAction);
+    reportActionableError(error.message);
+    throw error;
   }
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  try {
+    return await res.json() as T;
+  } catch {
+    const error = new ApiError(
+      res.status,
+      "The API returned a non-JSON success response.",
+      "Ask the operator to inspect the reverse proxy and backend logs, then retry.",
+    );
+    reportActionableError(error.message);
+    throw error;
+  }
 }
 
 // --- types -------------------------------------------------------------- //
@@ -98,7 +121,10 @@ export interface EvalRun {
   mean_score: number; passed: number; failed: number; total: number;
   is_baseline: boolean; has_regressions: boolean | null; finished_at: string | null;
 }
-export interface Verify { ok: boolean; event_count: number; broken_index: number | null; reason: string | null; }
+export interface Verify {
+  ok: boolean; event_count: number; broken_index: number | null;
+  reason: string | null; next_action: string | null;
+}
 export interface SiemSink { name: string; type: string; enabled: boolean; }
 export interface SiemStats {
   processed: number; batches: number; delivered: number;
@@ -110,9 +136,10 @@ export interface SiemStatus {
   redaction_enabled: boolean; presets: SiemPreset[];
 }
 export interface DlqEntry {
-  sink: string; error: string; attempts: number; failed_at: string; event_count: number;
+  sink: string; error: string; next_action: string;
+  attempts: number; failed_at: string; event_count: number;
 }
-export interface SinkTest { ok: boolean; detail: string; }
+export interface SinkTest { ok: boolean; detail: string; next_action?: string | null; }
 export interface TimelinePoint {
   seq: number; ts: string; event_type: string; name: string | null;
   cost_micro: number; cumulative_micro: number; cumulative_tokens: number; elapsed_s: number;
@@ -187,7 +214,7 @@ export const api = {
   siemTestSink: (name: string) =>
     request<SinkTest>(`/siem/sinks/${encodeURIComponent(name)}/test`, { method: "POST" }),
   siemReplay: (sink?: string) =>
-    request<{ replayed: number; failed: number; skipped: number }>(
+    request<{ replayed: number; failed: number; skipped: number; next_action?: string }>(
       `/siem/dlq/replay${sink ? `?sink=${encodeURIComponent(sink)}` : ""}`,
       { method: "POST" }
     ),
